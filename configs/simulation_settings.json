@@ -1,0 +1,75 @@
+{
+  "simulation_environment": {
+    "solution_type": "DrivenModal",
+    "unit": "mm",
+    "frequency_unit": "GHz",
+    "ansys_version_preference": ["2024.1", "2023.2", "2023.1", "2022.2", "2021.2"],
+    "non_graphical": true
+  },
+  "air_box": {
+    "type": "Radiation",
+    "margin_mm": 25.0,
+    "boundary_name": "RadiationBox"
+  },
+  "excitation": {
+    "port_type": "LumpedPort",
+    "port_name": "P1_CPW",
+    "reference_impedance_ohm": 50.0,
+    "integration_line": {
+      "start": [0.0, 0.0, 0.0],
+      "end": [0.0, 0.0, 0.0],
+      "description": "Integration vector defined from coplanar ground reference to center feed conductor"
+    }
+  },
+  "solution_setup": {
+    "setup_name": "Setup_UWB",
+    "solution_frequency_ghz": 7.5,
+    "max_passes": 12,
+    "max_delta_s": 0.02,
+    "basis_order": "FirstOrder",
+    "mesh_refinement_percentage": 30
+  },
+  "frequency_sweep": {
+    "sweep_name": "Sweep_1to14GHz",
+    "sweep_type": "Interpolating",
+    "start_freq_ghz": 1.0,
+    "stop_freq_ghz": 14.0,
+    "step_size_ghz": 0.01,
+    "save_fields": false,
+    "verify_converged_points": true
+  },
+  "hardware_safeguards": {
+    "max_cores": 4,
+    "max_memory_percent": 80.0,
+    "min_disk_free_gb": 10.0,
+    "allow_gpu": false,
+    "sequential_execution": true,
+    "simulation_timeout_seconds": 3600
+  },
+  "execution_stages": [
+    {
+      "stage": 1,
+      "name": "Stage 1: Type A Baseline",
+      "config": "Type_A",
+      "param": null
+    },
+    {
+      "stage": 2,
+      "name": "Stage 2: Type C RAD 10.2mm Target",
+      "config": "Type_C",
+      "param": 10.2
+    },
+    {
+      "stage": 3,
+      "name": "Stage 3: Type B Straight Cuts",
+      "config": "Type_B",
+      "params": [3.0, 5.0, 7.0]
+    },
+    {
+      "stage": 4,
+      "name": "Stage 4: Type C Full Sweep",
+      "config": "Type_C",
+      "params": [13.0, 12.0, 11.0, 10.0]
+    }
+  ]
+}

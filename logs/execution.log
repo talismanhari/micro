@@ -1,0 +1,8 @@
+2026-11-01 16:10:19,312 [INFO] src.materials: Materials verified: Substrate=FR4_epoxy (eps=4.4, tand=0.02), Metal=copper
+2026-11-01 16:10:19,314 [INFO] UWB_MAIN: Generated benchmark reference datasets in results/raw/ (clearly tagged as reference).
+2026-11-01 16:10:19,813 [INFO] src.plotting: Saved layout diagram: /Users/harikrishnanj/Downloads/micro/UWB_ANTENNA_ENGINEERING/results/figures/layout_Type_A.png
+2026-11-01 16:10:19,880 [INFO] src.plotting: Saved layout diagram: /Users/harikrishnanj/Downloads/micro/UWB_ANTENNA_ENGINEERING/results/figures/layout_Type_B.png
+2026-11-01 16:10:19,945 [INFO] src.plotting: Saved layout diagram: /Users/harikrishnanj/Downloads/micro/UWB_ANTENNA_ENGINEERING/results/figures/layout_Type_C.png
+2026-11-01 16:10:20,046 [INFO] src.plotting: Saved multi-comparison plot: /Users/harikrishnanj/Downloads/micro/UWB_ANTENNA_ENGINEERING/results/figures/S11_comparison_all_types.png
+2026-11-01 16:10:20,116 [INFO] src.plotting: Saved VSWR plot: /Users/harikrishnanj/Downloads/micro/UWB_ANTENNA_ENGINEERING/results/figures/VSWR_Type_C_10.2mm.png
+2026-11-01 16:10:20,583 [INFO] src.report_generator: Generated PDF engineering report: /Users/harikrishnanj/Downloads/micro/UWB_ANTENNA_ENGINEERING/report/final_report.pdf

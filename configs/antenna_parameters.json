@@ -1,0 +1,164 @@
+{
+  "project_metadata": {
+    "project_name": "UWB_ANTENNA_ENGINEERING",
+    "paper_title": "ULTRA HIGH BAND IMPROVEMENT OF PATCH ANTENNA",
+    "authors": "J.R. Arunkumar, R. Anusuya, M. Sundarrajan, M. Ramkumar Prabhu",
+    "journal": "Journal of Engineering Sciences, Vol 11, Issue 2, Feb 2020",
+    "units": {
+      "length": "mm",
+      "frequency": "GHz",
+      "bandwidth": "MHz",
+      "impedance": "ohm",
+      "s_parameter": "dB"
+    }
+  },
+  "substrate": {
+    "material": "FR4_epoxy",
+    "length_mm": 38.0,
+    "width_mm": 43.0,
+    "thickness_mm": 1.53,
+    "relative_permittivity": 4.4,
+    "dielectric_loss_tangent": 0.02
+  },
+  "metallization": {
+    "material": "copper",
+    "thickness_mm": 0.1,
+    "conductivity_siemens_per_m": 5.8e7
+  },
+  "feed": {
+    "type": "CPW",
+    "characteristic_impedance_ohm": 50.0,
+    "width_mm": 3.1,
+    "feed_to_ground_gap_mm": 0.55,
+    "patch_to_ground_gap_mm": 0.50
+  },
+  "ground": {
+    "length_mm": 18.4,
+    "width_mm": 16.9,
+    "count": 2,
+    "placement": "coplanar_symmetrical"
+  },
+  "patch": {
+    "length_mm": 18.4,
+    "width_mm": 18.4,
+    "shape": "square"
+  },
+  "configurations": {
+    "Type_A": {
+      "description": "Baseline rectangular/square patch without cuts",
+      "truncation_type": "none"
+    },
+    "Type_B": {
+      "description": "Straight-edge corner truncation",
+      "truncation_type": "straight",
+      "cut_dimensions_mm": [3.0, 5.0, 7.0],
+      "default_cut_mm": 7.0,
+      "corners": "bottom"
+    },
+    "Type_C": {
+      "description": "Circular-edge corner truncation",
+      "truncation_type": "circular",
+      "radii_mm": [13.0, 12.0, 11.0, 10.0, 10.2],
+      "target_radius_mm": 10.2,
+      "corners": "bottom"
+    }
+  },
+  "published_reference_data": {
+    "Type_A": {
+      "bands": [
+        {
+          "f_lower_ghz": 3.0526,
+          "f_upper_ghz": 3.8877,
+          "published_bw_mhz": 835.10,
+          "prose_reported_bw_mhz": 847.80
+        }
+      ]
+    },
+    "Type_B": {
+      "3mm": {
+        "bands": [
+          {
+            "f_lower_ghz": 3.0825,
+            "f_upper_ghz": 4.0667,
+            "published_bw_mhz": 984.20
+          }
+        ]
+      },
+      "5mm": {
+        "bands": [
+          {
+            "f_lower_ghz": 3.0526,
+            "f_upper_ghz": 4.2754,
+            "published_bw_mhz": 1222.80
+          }
+        ]
+      },
+      "7mm": {
+        "bands": [
+          {
+            "f_lower_ghz": 2.9333,
+            "f_upper_ghz": 8.0035,
+            "published_bw_mhz": 5070.20
+          }
+        ]
+      }
+    },
+    "Type_C": {
+      "13mm": {
+        "bands": [
+          {
+            "f_lower_ghz": 2.9632,
+            "f_upper_ghz": 3.7982,
+            "published_bw_mhz": 835.10
+          }
+        ]
+      },
+      "12mm": {
+        "bands": [
+          {
+            "f_lower_ghz": 3.0228,
+            "f_upper_ghz": 3.8877,
+            "published_bw_mhz": 864.90
+          }
+        ]
+      },
+      "11mm": {
+        "bands": [
+          {
+            "f_lower_ghz": 3.0526,
+            "f_upper_ghz": 4.0965,
+            "published_bw_mhz": 1445.90
+          },
+          {
+            "f_lower_ghz": 7.7649,
+            "f_upper_ghz": 11.9702,
+            "published_bw_mhz": 4545.30
+          }
+        ]
+      },
+      "10mm": {
+        "bands": [
+          {
+            "f_lower_ghz": 3.0228,
+            "f_upper_ghz": 4.6632,
+            "published_bw_mhz": 2640.40
+          },
+          {
+            "f_lower_ghz": 6.0649,
+            "f_upper_ghz": 12.0000,
+            "published_bw_mhz": 6935.10
+          }
+        ]
+      },
+      "10.2mm": {
+        "bands": [
+          {
+            "f_lower_ghz": 3.0526,
+            "f_upper_ghz": 12.0000,
+            "published_bw_mhz": 9124.70
+          }
+        ]
+      }
+    }
+  }
+}
