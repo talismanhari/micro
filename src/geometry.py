@@ -179,12 +179,16 @@ class AntennaGeometry:
     def lumped_port_sheet(self) -> Dict[str, Any]:
         """
         CPW Lumped Port excitation sheet at input edge (y = 0).
-        Spans across ground-gap-feed-gap-ground at y = 0.
+        Spans across ground-gap-feed-gap-ground at y = 0,
+        covering the full substrate thickness from z = -sub_h to z = 0,
+        touching the central feed conductor and coplanar ground planes.
         """
-        total_span = self.feed_wid + 2 * self.feed_to_gnd_gap
+        total_span = round(self.feed_wid + 2 * self.feed_to_gnd_gap, 4)
         return {
             "name": "Port_P1",
-            "origin": [-total_span / 2.0, 0.0, 0.0],
+            "origin": [-total_span / 2.0, 0.0, -self.sub_h],
+            "sizes": [total_span, self.sub_h],
             "size": [total_span, 0.0, self.sub_h],
-            "plane": "XZ"
+            "orientation": "Y",
+            "plane": "ZX"
         }

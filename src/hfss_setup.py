@@ -208,21 +208,20 @@ class HFSSAutomation:
                 return modeler.create_polyline(points, name=name, cover_surface=cover_surface)
 
     @staticmethod
-    def _create_rectangle(modeler, cs_plane, origin, sizes, name: str):
+    def _create_rectangle(modeler, orientation: str, origin: list, sizes: list, name: str):
         """
-        Creates a rectangle supporting PyAEDT 1.9.0 (cs_plane, origin, sizes, name)
-        and legacy PyAEDT (csPlane, position, dimension_list, name).
+        Creates a 2D rectangle sheet using verified PyAEDT 1.9.0 signature:
+        modeler.create_rectangle(orientation, origin, sizes, name=name)
         """
-        try:
-            return modeler.create_rectangle(cs_plane=cs_plane, origin=origin, sizes=sizes, name=name)
-        except TypeError:
-            try:
-                return modeler.create_rectangle(csPlane=cs_plane, position=origin, dimension_list=sizes, name=name)
-            except TypeError:
-                return modeler.create_rectangle(cs_plane, origin, sizes, name=name)
+        return modeler.create_rectangle(
+            orientation=orientation,
+            origin=origin,
+            sizes=sizes,
+            name=name
+        )
 
     def build_model(self, config_type: str = "Type_A", param: Optional[float] = None):
-        """Builds substrate, grounds, feed line, patch, air box, boundaries, and ports."""
+        """Builds substrate, grounds, feed line, patch, port, air box, and boundaries."""
         if not self.hfss:
             raise RuntimeError("HFSS instance is not initialized.")
 
@@ -278,7 +277,51 @@ class HFSSAutomation:
         patch_sheet.material_name = self.materials.metallization_name
         logger.info(f"Created Radiating Patch: {config_type} (param={param}).")
 
-        # 6. Radiation Air Box & Boundary
+        # 6. Lumped Port Excitation (created on antenna structure before enclosing in air box)
+        port_info = self.geom.lumped_port_sheet
+        orientation = port_info.get("orientation", "Y")
+        port_sheet = self._create_rectangle(
+            m,
+            orientation=orientation,
+            origin=port_info["origin"],
+            sizes=port_info["sizes"],
+            name=port_info["name"]
+        )
+        logger.info(f"Created Port Sheet '{port_sheet.name}' on {orientation} plane (origin={port_info['origin']}, sizes={port_info['sizes']}).")
+
+        port_name = self.sim_cfg.get("excitation", {}).get("port_name", "P1_CPW")
+        port_z0 = self.sim_cfg.get("excitation", {}).get("reference_impedance_ohm", 50.0)
+
+        # Check solution type: Terminal vs DrivenModal
+        is_terminal = "terminal" in str(getattr(self.hfss, "solution_type", "Terminal")).lower()
+        if is_terminal:
+            ref_grounds = [g["name"] for g in self.geom.ground_planes]
+            try:
+                self.hfss.lumped_port(
+                    assignment=port_sheet.name,
+                    reference=ref_grounds,
+                    name=port_name
+                )
+                logger.info(f"Assigned CPW Terminal Port '{port_name}' with reference grounds {ref_grounds}.")
+            except Exception as te:
+                logger.warning(f"Multi-reference port assignment notice: {te}. Retrying with primary ground reference...")
+                self.hfss.lumped_port(
+                    assignment=port_sheet.name,
+                    reference=ref_grounds[0],
+                    name=port_name
+                )
+                logger.info(f"Assigned CPW Terminal Port '{port_name}' with primary reference '{ref_grounds[0]}'.")
+        else:
+            self.hfss.create_lumped_port_to_sheet(
+                sheet_name=port_sheet.name,
+                axisdir=0,
+                portname=port_name,
+                impedance=port_z0,
+                renormalize=True
+            )
+            logger.info(f"Assigned CPW Modal Lumped Port '{port_name}'.")
+
+        # 7. Radiation Air Box & Boundary
         ab = self.geom.get_air_box(margin_mm=self.sim_cfg.get("air_box", {}).get("margin_mm", 25.0))
         air_obj = self._create_box(
             m,
@@ -289,40 +332,6 @@ class HFSSAutomation:
         )
         self.hfss.assign_radiation_boundary_to_objects(air_obj.name)
         logger.info("Created Air Box and assigned Radiation Boundary.")
-
-        # 7. Lumped Port Excitation (handles both Terminal and DrivenModal solutions)
-        port_info = self.geom.lumped_port_sheet
-        port_sheet = self._create_rectangle(
-            m,
-            cs_plane=port_info["plane"],
-            origin=port_info["origin"],
-            sizes=[port_info["size"][0], port_info["size"][2]],
-            name=port_info["name"]
-        )
-        port_name = self.sim_cfg.get("excitation", {}).get("port_name", "P1_CPW")
-        port_z0 = self.sim_cfg.get("excitation", {}).get("reference_impedance_ohm", 50.0)
-
-        try:
-            self.hfss.create_lumped_port_to_sheet(
-                sheet_name=port_sheet.name,
-                axisdir=0,
-                portname=port_name,
-                impedance=port_z0,
-                renormalize=True
-            )
-            logger.info("Assigned 50-Ohm CPW Lumped Port.")
-        except Exception as pe:
-            logger.warning(f"Standard lumped port assignment note: {pe}. Retrying with terminal configuration...")
-            try:
-                # Terminal solution fallback
-                self.hfss.lumped_port(
-                    assignment=port_sheet.name,
-                    name=port_name,
-                    reference=self.geom.ground_planes[0]["name"]
-                )
-                logger.info("Assigned 50-Ohm CPW Terminal Port.")
-            except Exception as pe2:
-                logger.warning(f"Terminal port fallback note: {pe2}")
 
     def setup_solution_and_sweep(self):
         """Creates adaptive mesh setup and interpolating frequency sweep."""

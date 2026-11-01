@@ -226,3 +226,84 @@ def test_assign_pyaedt_materials_avoids_duplicate():
     assert success is True
     mock_materials.add_material.assert_not_called()
 
+
+def test_create_rectangle_pyaedt_190_signature():
+    """Verifies that _create_rectangle passes orientation, origin, sizes, and name to PyAEDT 1.9.0 modeler."""
+    mock_modeler = MagicMock()
+    HFSSAutomation._create_rectangle(
+        mock_modeler,
+        orientation="Y",
+        origin=[-2.1, 0.0, -1.53],
+        sizes=[4.2, 1.53],
+        name="Port_P1"
+    )
+    mock_modeler.create_rectangle.assert_called_once_with(
+        orientation="Y",
+        origin=[-2.1, 0.0, -1.53],
+        sizes=[4.2, 1.53],
+        name="Port_P1"
+    )
+
+
+def test_lumped_port_geometry_spans_substrate_and_conductors():
+    """
+    Verifies that lumped_port_sheet in AntennaGeometry:
+    - Origin at [-2.1, 0.0, -1.53] (bottom edge of substrate at feed end)
+    - Sizes [4.2, 1.53] (spans X in [-2.1, 2.1] and Z from -1.53 to 0.0)
+    - Normal orientation is 'Y' (ZX plane at Y=0)
+    """
+    from src.geometry import AntennaGeometry
+    antenna_cfg, _ = main.load_configurations()
+    geom = AntennaGeometry(antenna_cfg)
+    port = geom.lumped_port_sheet
+
+    assert port["name"] == "Port_P1"
+    assert port["orientation"] == "Y"
+    assert port["plane"] == "ZX"
+    assert port["origin"] == [-2.1, 0.0, -1.53]
+    assert port["sizes"] == [4.2, 1.53]
+
+
+def test_terminal_lumped_port_assignment_in_build_model():
+    """
+    Verifies that build_model invokes hfss.lumped_port with assignment='Port_P1'
+    and references matching the ground planes when solution_type is Terminal.
+    """
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.solution_type = "Terminal"
+    mock_modeler = MagicMock()
+    mock_hfss.modeler = mock_modeler
+
+    # Mock sheet and box returns
+    mock_sheet = MagicMock()
+    mock_sheet.name = "Port_P1"
+    mock_box = MagicMock()
+    mock_box.name = "AirBox"
+    mock_modeler.create_rectangle.return_value = mock_sheet
+    mock_modeler.create_box.return_value = mock_box
+    mock_modeler.create_polyline.return_value = MagicMock(name="Polyline")
+
+    hfss_auto.hfss = mock_hfss
+
+    with patch.object(hfss_auto.materials, "assign_pyaedt_materials", return_value=True):
+        hfss_auto.build_model(config_type="Type_A")
+
+    # Verify rectangle creation for Port_P1
+    mock_modeler.create_rectangle.assert_called_with(
+        orientation="Y",
+        origin=[-2.1, 0.0, -1.53],
+        sizes=[4.2, 1.53],
+        name="Port_P1"
+    )
+
+    # Verify Terminal port assignment
+    mock_hfss.lumped_port.assert_called_once_with(
+        assignment="Port_P1",
+        reference=["Ground_Left", "Ground_Right"],
+        name="P1_CPW"
+    )
+
+
