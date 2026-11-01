@@ -3,12 +3,13 @@
 Master orchestration entrypoint for UWB Antenna Engineering Project.
 Implements the ONE-COMMAND execution workflow for Windows Lenovo LOQ and macOS development:
 1. Environment auto-bootstrapping (.venv creation & dependency install)
-2. Pre-flight hardware and Ansys AEDT installation verification
+2. Pre-flight hardware and Ansys AEDT installation verification (supports Student 2025 R2)
 3. Static engineering geometry & material validation
-4. Interactive resource estimation & simulation confirmation
-5. Multi-stage HFSS electromagnetic solve (or local reference benchmark on macOS)
-6. Post-processing, -10 dB crossing extraction, and VSWR calculation
-7. Publication figure generation & IEEE PDF engineering report compilation
+4. HFSS connection and antenna model preparation (geometry, port, materials, setup)
+5. Safe stop before solving with planned resource display and user confirmation
+6. Multi-stage HFSS electromagnetic solve (when confirmed by user)
+7. Post-processing, -10 dB crossing extraction, and VSWR calculation
+8. Publication figure generation & IEEE PDF engineering report compilation
 """
 
 import sys
@@ -38,6 +39,7 @@ from src.postprocessing import PostProcessor
 from src.plotting import AntennaPlotter
 from src.report_generator import EngineeringReportGenerator
 from src.parameter_sweep import ParameterSweepManager
+from src.simulation import SimulationRunner
 
 # Setup unified logging
 LOG_DIR = ROOT / "logs"
@@ -66,7 +68,7 @@ def load_configurations():
 def generate_benchmark_reference_data(antenna_cfg):
     """
     Generates reference benchmark datasets strictly based on published research curves
-    for local validation, plotting, and report generation when native HFSS is absent.
+    for local validation, plotting, and report generation when native HFSS solve is not executed.
     Clearly tagged as REFERENCE BENCHMARK DATA.
     """
     raw_dir = ROOT / "results" / "raw"
@@ -102,7 +104,7 @@ def generate_benchmark_reference_data(antenna_cfg):
     logger.info("Generated benchmark reference datasets in results/raw/ (tagged as reference data).")
 
 
-def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = False):
+def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = False, prepare_only: bool = False):
     """Coordinates the complete end-to-end automated workflow."""
     print("=" * 75)
     print("   UWB ANTENNA ENGINEERING — ONE-COMMAND AUTOMATED WORKFLOW")
@@ -112,6 +114,7 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
     plotter = AntennaPlotter(output_dir=str(ROOT / "results" / "figures"))
     processor = PostProcessor()
     validator = AntennaValidator(antenna_cfg, sim_cfg)
+    runner = SimulationRunner(antenna_cfg, sim_cfg)
 
     # 1. Environment & Pre-Flight Check
     print("\n[PHASE 1] Pre-Flight Diagnostics & Hardware Inspection")
@@ -121,10 +124,13 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
     aedt_installs = env.get("aedt_installed", [])
     running_aedt = env.get("aedt_running_processes", [])
 
+    install_labels = [f"{d['version']}{' [Student]' if d.get('is_student') else ''}" for d in aedt_installs]
+    aedt_summary = ', '.join(install_labels) if install_labels else 'None Detected'
+
     print(f"  • Platform: {env['os_name']} ({env['machine']})")
     print(f"  • Python: {env['python_version']} ({'Virtualenv' if env['in_virtualenv'] else 'System'})")
     print(f"  • PyAEDT: {env['pyaedt_version']}")
-    print(f"  • Installed AEDT: {', '.join([d['version'] for d in aedt_installs]) if aedt_installs else 'None Detected'}")
+    print(f"  • Installed AEDT: {aedt_summary}")
     print(f"  • Active AEDT Process: {'Yes (Will connect)' if running_aedt else 'No (Will launch on demand)'}")
     print(f"  • RAM: {env['available_ram_gb']} GB available ({env['ram_used_percent']}% utilized)")
     print(f"  • Disk Space: {env['disk_free_gb']} GB free")
@@ -139,13 +145,23 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
         sys.exit(1)
     print("  ✓ Static engineering validation passed 100%.")
 
-    # 3. Simulation Decision & Resource Planning
-    can_simulate_native = is_windows and has_pyaedt and (len(aedt_installs) > 0 or running_aedt)
+    # 3. Model Preparation in HFSS (if on Windows / HFSS available)
+    can_access_hfss = is_windows and has_pyaedt and (len(aedt_installs) > 0 or running_aedt)
     if force_simulate:
-        can_simulate_native = True
+        can_access_hfss = True
 
-    if can_simulate_native:
-        print("\n[PHASE 3] HFSS Simulation Planning & Resource Estimates")
+    if can_access_hfss:
+        print("\n[PHASE 3] Ansys HFSS Connection & Antenna Model Preparation")
+        print("  Connecting to HFSS session (port: 50051 / Student 2025 R2)...")
+        prep_res = runner.prepare_model_only(config_type="Type_A")
+        if prep_res.get("status") == "MODEL_PREPARED":
+            print(f"  ✓ Antenna model prepared in HFSS (Project: {prep_res.get('project_name')}, Design: {prep_res.get('design_name')}).")
+            print("  ✓ Materials, CPW feed, ground planes, lumped port, and radiation air box assigned.")
+        else:
+            print(f"  ⚠ Model preparation notice: {prep_res.get('error', 'Status: ' + str(prep_res.get('status')))}")
+
+        # 4. Planned Simulation Review & Safe Stop Before Solving
+        print("\n[PHASE 4] Simulation Review & Resource Safety Gate")
         print("  Planned 4-Stage Sequential Execution:")
         print("    • Stage 1: Type A Baseline (Square Patch 18.4mm)")
         print("               Est: ~5-10 min | ~1.5 GB RAM | 1 HFSS Core")
@@ -155,19 +171,25 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
         print("               Est: ~20-30 min | ~2.0 GB RAM | Bandwidth Progression")
         print("    • Stage 4: Type C Full Sweep (13mm, 12mm, 11mm, 10mm)")
         print("               Est: ~30-45 min | ~2.0 GB RAM | Resonance Merging Study")
-        print("  Safety Guard: 1 simulation at a time. Progress saved at each stage checkpoint.")
+        print("  Safety Guard: 1 simulation at a time. Safe stop before solve enabled.")
 
-        if not auto_confirm:
+        should_solve = False
+        if prepare_only:
+            print("\n  ℹ Stopping safely before solve (--prepare-only mode active).")
+        elif auto_confirm:
+            should_solve = True
+        else:
             try:
-                reply = input("\n  Start automated HFSS simulation on this machine? [Y/n]: ").strip().lower()
-                if reply in ["n", "no"]:
-                    print("  Simulation skipped by user. Continuing to post-processing and report generation.")
-                    can_simulate_native = False
+                reply = input("\n  Start full electromagnetic solve now? [y/N]: ").strip().lower()
+                if reply in ["y", "yes"]:
+                    should_solve = True
+                else:
+                    print("  ℹ Stopped safely before solve. Model remains open and prepared in HFSS.")
             except (EOFError, KeyboardInterrupt):
-                can_simulate_native = False
+                print("\n  ℹ Stopped safely before solve.")
 
-        if can_simulate_native:
-            print("\n[PHASE 3B] Executing Ansys HFSS Multi-Stage Pipeline...")
+        if should_solve:
+            print("\n[PHASE 4B] Executing Ansys HFSS Multi-Stage Pipeline...")
             sweep_mgr = ParameterSweepManager(antenna_cfg, sim_cfg)
             sim_success = sweep_mgr.execute_full_pipeline()
             if not sim_success:
@@ -182,13 +204,13 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
         else:
             print("  ⚠ Ansys AEDT or PyAEDT not detected. Check 'environment_check.py' for setup instructions.")
 
-    # 4. Ensure datasets exist (use benchmark if simulation was not run)
+    # 5. Ensure datasets exist (use benchmark if simulation was not run)
     target_csv = ROOT / "results" / "raw" / "S11_Type_C_10.2mm.csv"
     if not target_csv.exists():
         generate_benchmark_reference_data(antenna_cfg)
 
-    # 5. Plotting
-    print("\n[PHASE 4] Generating Antenna Layout Diagrams & S11/VSWR Figures")
+    # 6. Plotting
+    print("\n[PHASE 5] Generating Antenna Layout Diagrams & S11/VSWR Figures")
     figure_paths = {}
     f_lay_a = plotter.plot_geometry_layout(antenna_cfg, "Type_A", None, "layout_Type_A.png")
     f_lay_b = plotter.plot_geometry_layout(antenna_cfg, "Type_B", 7.0, "layout_Type_B.png")
@@ -227,8 +249,8 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
 
     print("  ✓ Layout and S11/VSWR plots saved in results/figures/.")
 
-    # 6. Postprocessing & Discrepancy Analysis Table
-    print("\n[PHASE 5] Post-Processing & Literature Discrepancy Verification")
+    # 7. Postprocessing & Discrepancy Analysis Table
+    print("\n[PHASE 6] Post-Processing & Literature Discrepancy Verification")
     if "Type C (RAD=10.2mm Target)" in datasets:
         fq, s11 = datasets["Type C (RAD=10.2mm Target)"]
         sim_bands = processor.extract_operating_bands(fq, s11)
@@ -243,8 +265,8 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
             if "simulated_bw_mhz" in comp:
                 print(f"    Simulated BW: {comp.get('simulated_bw_mhz')} MHz")
 
-    # 7. PDF Report Generation
-    print("\n[PHASE 6] Compiling College-Grade Engineering PDF Report")
+    # 8. PDF Report Generation
+    print("\n[PHASE 7] Compiling College-Grade Engineering PDF Report")
     rep_gen = EngineeringReportGenerator(output_pdf_path=str(ROOT / "report" / "final_report.pdf"))
     out_pdf = rep_gen.build_report(
         antenna_cfg=antenna_cfg,
@@ -263,8 +285,13 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="UWB Antenna Engineering Master Workflow")
     parser.add_argument("--yes", "-y", action="store_true", help="Automatically confirm simulation prompt")
+    parser.add_argument("--prepare-only", action="store_true", help="Prepare model in HFSS and stop safely before solve")
     parser.add_argument("--force-simulate", action="store_true", help="Force simulation mode attempt")
     parser.add_argument("--no-bootstrap", action="store_true", help="Skip virtualenv self-bootstrapping")
     args = parser.parse_args()
 
-    run_one_command_workflow(auto_confirm=args.yes, force_simulate=args.force_simulate)
+    run_one_command_workflow(
+        auto_confirm=args.yes,
+        force_simulate=args.force_simulate,
+        prepare_only=args.prepare_only
+    )

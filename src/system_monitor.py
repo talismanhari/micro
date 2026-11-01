@@ -1,7 +1,8 @@
 """
 Hardware inspection, resource monitoring, and thermal/memory safeguards.
 Designed to protect the Lenovo LOQ simulation laptop and log system status.
-Includes deep Windows Ansys AEDT installation and process detection.
+Includes deep Windows Ansys AEDT installation and process detection,
+with full support for Ansys Electronics Desktop Student 2025 R2 (v252).
 """
 
 import sys
@@ -24,7 +25,7 @@ class SystemMonitor:
     """Monitors system hardware resources, detects AEDT software, and enforces safety thresholds."""
 
     KNOWN_AEDT_VERSIONS = [
-        "2024.2", "2024.1", "2023.2", "2023.1", "2022.2", "2022.1", "2021.2"
+        "2025.2", "2025.1", "2024.2", "2024.1", "2023.2", "2023.1", "2022.2", "2022.1", "2021.2"
     ]
 
     def __init__(self, min_disk_gb: float = 10.0, max_ram_percent: float = 85.0):
@@ -32,43 +33,100 @@ class SystemMonitor:
         self.max_ram_percent = max_ram_percent
 
     @classmethod
-    def detect_installed_aedt_versions(cls) -> List[Dict[str, str]]:
+    def detect_installed_aedt_versions(cls) -> List[Dict[str, Any]]:
         """
         Detects installed Ansys Electronics Desktop versions on the machine.
+        Supports Ansys Student 2025 R2 (v252) and standard commercial installations.
         Checks:
-        1. Environment variables (ANSYSEM_ROOT*)
-        2. Standard Windows installation directories (C:\\Program Files\\AnsysEM\\...)
+        1. Environment variables (ANSYSEM_ROOT*, ANSYS_ROOT*)
+        2. Standard Windows installation directories including:
+           - C:\\Program Files\\ANSYS Inc\\ANSYS Student\\v252\\AnsysEM
+           - C:\\Program Files\\ANSYS Inc\\v*\\AnsysEM
+           - C:\\Program Files\\AnsysEM\\v*\\Win64
         3. Windows Registry (if on Windows)
         """
-        detected = []
+        detected: List[Dict[str, Any]] = []
+
+        def _add_if_new(version: str, path: str, source: str, is_student: bool = False):
+            if not any(d["version"] == version and d["path"] == path for d in detected):
+                detected.append({
+                    "version": version,
+                    "path": path,
+                    "source": source,
+                    "is_student": is_student
+                })
 
         # 1. Environment variables
         for ver in cls.KNOWN_AEDT_VERSIONS:
-            env_key = f"ANSYSEM_ROOT{ver.replace('.', '')}"
-            val = os.environ.get(env_key)
-            if val and Path(val).exists():
-                detected.append({"version": ver, "path": str(Path(val).resolve()), "source": "environment_variable"})
-
-        # 2. Standard Windows Installation Paths
-        if platform.system() == "Windows":
-            base_candidates = [
-                Path(os.environ.get("ProgramFiles", "C:\\Program Files")) / "AnsysEM",
-                Path(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")) / "AnsysEM"
+            ver_clean = ver.replace(".", "")
+            # Check e.g. ANSYSEM_ROOT252 or ANSYSEM_ROOT20252
+            env_candidates = [
+                f"ANSYSEM_ROOT{ver_clean}",
+                f"ANSYSEM_ROOT{ver_clean[2:]}" if len(ver_clean) == 5 else f"ANSYSEM_ROOT{ver_clean}",
+                f"ANSYS_ROOT{ver_clean}",
             ]
-            for base in base_candidates:
-                if base.exists():
-                    for ver in cls.KNOWN_AEDT_VERSIONS:
-                        ver_folder = f"v{ver.replace('.', '')}"
-                        full_p = base / ver_folder / "Win64"
-                        if full_p.exists() and not any(d["version"] == ver for d in detected):
-                            detected.append({"version": ver, "path": str(full_p.resolve()), "source": "filesystem"})
+            for env_key in env_candidates:
+                val = os.environ.get(env_key)
+                if val and Path(val).exists():
+                    is_stud = "student" in val.lower()
+                    _add_if_new(ver, str(Path(val).resolve()), f"env:{env_key}", is_student=is_stud)
+
+        # 2. Windows Filesystem Paths
+        if platform.system() == "Windows" or os.environ.get("MOCK_WINDOWS_AEDT_CHECK"):
+            prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+            prog_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+
+            search_roots = [
+                Path(prog_files) / "ANSYS Inc",
+                Path(prog_files) / "AnsysEM",
+                Path(prog_files_x86) / "ANSYS Inc",
+                Path(prog_files_x86) / "AnsysEM",
+            ]
+
+            for ver in cls.KNOWN_AEDT_VERSIONS:
+                ver_code = f"v{ver.replace('.', '')[2:]}" if len(ver.replace('.', '')) == 5 else f"v{ver.replace('.', '')}"
+                # e.g. v252, v242, v232
+
+                specific_paths = [
+                    # Verified Student installation path:
+                    Path(prog_files) / "ANSYS Inc" / "ANSYS Student" / ver_code / "AnsysEM",
+                    Path(prog_files) / "ANSYS Inc" / "ANSYS Student" / ver_code / "AnsysEM" / "Win64",
+                    # Commercial / Standard paths:
+                    Path(prog_files) / "ANSYS Inc" / ver_code / "AnsysEM",
+                    Path(prog_files) / "AnsysEM" / ver_code / "Win64",
+                    Path(prog_files) / "AnsysEM" / ver_code,
+                    # x86 fallbacks:
+                    Path(prog_files_x86) / "ANSYS Inc" / "ANSYS Student" / ver_code / "AnsysEM",
+                    Path(prog_files_x86) / "ANSYS Inc" / ver_code / "AnsysEM",
+                ]
+
+                for p in specific_paths:
+                    if p.exists():
+                        is_stud = "student" in str(p).lower()
+                        _add_if_new(ver, str(p.resolve()), "filesystem", is_student=is_stud)
+
+            # Broad directory scan under ANSYS Inc
+            ansys_inc = Path(prog_files) / "ANSYS Inc"
+            if ansys_inc.exists():
+                try:
+                    for student_dir in ansys_inc.glob("*Student*/v*/AnsysEM"):
+                        if student_dir.exists():
+                            # Extract version from e.g. v252
+                            v_folder = student_dir.parent.name
+                            if v_folder.startswith("v") and len(v_folder) >= 4:
+                                num = v_folder[1:]
+                                ver_str = f"20{num[:2]}.{num[2:]}"
+                                _add_if_new(ver_str, str(student_dir.resolve()), "filesystem_student", is_student=True)
+                except Exception:
+                    pass
 
             # 3. Windows Registry
             try:
                 import winreg
                 reg_paths = [
                     r"SOFTWARE\Ansys\Electronics Desktop",
-                    r"SOFTWARE\Ansys\AnsysEM"
+                    r"SOFTWARE\Ansys\AnsysEM",
+                    r"SOFTWARE\Ansys\Student"
                 ]
                 for reg_p in reg_paths:
                     try:
@@ -79,8 +137,8 @@ class SystemMonitor:
                             if subkey_name.startswith("v"):
                                 v_num = subkey_name[1:]
                                 ver_formatted = f"20{v_num[:2]}.{v_num[2:]}" if len(v_num) >= 3 else subkey_name
-                                if not any(d["version"] == ver_formatted for d in detected):
-                                    detected.append({"version": ver_formatted, "path": "Registry Registered", "source": "winreg"})
+                                is_stud = "student" in reg_p.lower() or "student" in subkey_name.lower()
+                                _add_if_new(ver_formatted, f"Registry: {reg_p}\\{subkey_name}", "winreg", is_student=is_stud)
                         winreg.CloseKey(key)
                     except Exception:
                         pass
@@ -179,6 +237,9 @@ class SystemMonitor:
         info["aedt_running_processes"] = cls.check_running_aedt_processes()
         info["license_info"] = cls.check_license_environment()
         info["missing_dependencies"] = cls.check_missing_dependencies()
+
+        # Student status
+        info["has_student_version"] = any(d.get("is_student") for d in info["aedt_installed"])
 
         return info
 

@@ -1,10 +1,14 @@
 {
   "simulation_environment": {
-    "solution_type": "DrivenModal",
+    "solution_type": "Terminal",
     "unit": "mm",
     "frequency_unit": "GHz",
-    "ansys_version_preference": ["2024.1", "2023.2", "2023.1", "2022.2", "2021.2"],
-    "non_graphical": true
+    "ansys_version_preference": ["2025.2", "2024.1", "2023.2", "2023.1", "2022.2", "2021.2"],
+    "student_version": true,
+    "port": 50051,
+    "project_name": "Project1",
+    "design_name": "HFSSDesign1",
+    "non_graphical": false
   },
   "air_box": {
     "type": "Radiation",

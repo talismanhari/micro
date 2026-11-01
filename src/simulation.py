@@ -1,6 +1,7 @@
 """
 Single-run HFSS simulation coordinator and dataset exporter.
 Ensures resource-safe execution, timeout handling, and structured data persistence.
+Supports both model-preparation-only mode and full electromagnetic solve.
 """
 
 from pathlib import Path
@@ -28,6 +29,48 @@ class SimulationRunner:
             min_disk_gb=sim_cfg.get("hardware_safeguards", {}).get("min_disk_free_gb", 10.0),
             max_ram_percent=sim_cfg.get("hardware_safeguards", {}).get("max_memory_percent", 80.0)
         )
+
+    def prepare_model_only(
+        self,
+        config_type: str = "Type_A",
+        param: Optional[float] = None,
+        project_dir: str = "hfss_projects"
+    ) -> Dict[str, Any]:
+        """
+        Connects to HFSS, builds model geometry, assigns materials, port, and air box,
+        and saves the project WITHOUT executing the electromagnetic solve or mesh.
+        """
+        tag = f"{config_type}" if param is None else f"{config_type}_{param}mm"
+        aedt_path = Path(project_dir) / config_type / f"{tag}.aedt"
+
+        logger.info(f"Connecting to HFSS and preparing model: {tag}")
+        hfss_auto = HFSSAutomation(self.antenna_cfg, self.sim_cfg)
+
+        try:
+            hfss_app = hfss_auto.initialize_hfss(
+                project_path=str(aedt_path),
+                design_name=tag
+            )
+            hfss_auto.prepare_model(config_type=config_type, param=param)
+
+            return {
+                "config": config_type,
+                "param": param,
+                "status": "MODEL_PREPARED",
+                "aedt_path": str(aedt_path),
+                "project_name": hfss_app.project_name,
+                "design_name": hfss_app.design_name
+            }
+        except Exception as e:
+            logger.error(f"HFSS model preparation failed for {tag}: {e}")
+            return {
+                "config": config_type,
+                "param": param,
+                "status": "FAILED",
+                "error": str(e)
+            }
+        finally:
+            hfss_auto.close()
 
     def run_configuration(
         self,
@@ -67,8 +110,7 @@ class SimulationRunner:
         try:
             hfss_app = hfss_auto.initialize_hfss(
                 project_path=str(aedt_path),
-                design_name=tag,
-                non_graphical=self.sim_cfg.get("simulation_environment", {}).get("non_graphical", True)
+                design_name=tag
             )
 
             # Build model
@@ -81,15 +123,27 @@ class SimulationRunner:
             logger.info(f"Running adaptive meshing and frequency sweep for {tag}...")
             setup.analyze()
 
-            # Export S11 results
+            # Export S11 results (handling both Terminal and Modal solution types)
             logger.info(f"Extracting S11 data to: {csv_path}")
-            report = hfss_app.post.create_report(
-                expressions=["dB(S(P1_CPW,P1_CPW))"],
-                setup_sweep_name=f"{setup.name} : {sweep.name}",
-                report_category="Standard",
-                plot_type="Rectangular Plot"
-            )
-            report.export_report_to_csv(str(csv_path))
+            report_expressions = ["dB(St(P1_CPW,P1_CPW))", "dB(S(P1_CPW,P1_CPW))"]
+            report_exported = False
+
+            for expr in report_expressions:
+                try:
+                    report = hfss_app.post.create_report(
+                        expressions=[expr],
+                        setup_sweep_name=f"{setup.name} : {sweep.name}",
+                        report_category="Standard",
+                        plot_type="Rectangular Plot"
+                    )
+                    report.export_report_to_csv(str(csv_path))
+                    report_exported = True
+                    break
+                except Exception as ex:
+                    logger.debug(f"Expression {expr} export attempt: {ex}")
+
+            if not report_exported:
+                raise RuntimeError(f"Could not export S-parameter report for expressions: {report_expressions}")
 
             # Save project
             hfss_auto.save_project()

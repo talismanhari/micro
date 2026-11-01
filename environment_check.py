@@ -2,7 +2,7 @@
 """
 Comprehensive environment inspection and diagnostic tool for UWB Antenna Engineering.
 Executes on both macOS development machine and Windows Lenovo LOQ simulation laptop.
-Detects operating system, Python, PyAEDT, installed Ansys AEDT versions, license, and processes.
+Detects operating system, Python, PyAEDT, installed Ansys AEDT / Student versions (including 2025 R2), license, and processes.
 """
 
 import sys
@@ -48,11 +48,17 @@ def run_check(verbose: bool = True) -> bool:
         print(f" Python Version         : {info['python_version']} ({'Virtualenv' if info['in_virtualenv'] else 'Global System'})")
         print(f" Python Executable      : {info['python_executable']}")
         print(f" PyAEDT Version         : {info['pyaedt_version']}")
-        aedt_summary = ', '.join([f"{d['version']} ({d['source']})" for d in aedt_installs]) if aedt_installs else 'None Detected'
+
+        install_labels = []
+        for d in aedt_installs:
+            stud_tag = " [Student Edition]" if d.get("is_student") else ""
+            install_labels.append(f"{d['version']}{stud_tag} ({d['source']})")
+        aedt_summary = ', '.join(install_labels) if install_labels else 'None Detected'
         active_proc_summary = f"Running (PID {running_aedt[0]['pid']})" if running_aedt else 'None (will auto-launch)'
+
         print(f" Installed Ansys AEDT   : {aedt_summary}")
         print(f" Active AEDT Processes  : {active_proc_summary}")
-        print(f" License Configured     : {'Yes' if lic_info.get('license_configured') else 'Default / Unset'}")
+        print(f" License Configured     : {'Yes' if lic_info.get('license_configured') else 'Default / Student Built-in'}")
         print(f" System RAM             : {info['available_ram_gb']} GB available / {info['total_ram_gb']} GB total ({info['ram_used_percent']}% used)")
         print(f" Free Storage           : {disk_free} GB available / {info['disk_total_gb']} GB total")
         print(f" Config Files Valid     : {'Yes' if configs_ok else 'Missing configs/'}")
@@ -85,11 +91,11 @@ def run_check(verbose: bool = True) -> bool:
             f"   Remediation: Run '{sys.executable} -m pip install pyaedt'"
         )
 
-    if is_windows and not aedt_installs:
+    if is_windows and not aedt_installs and not running_aedt:
         ready_for_hfss = False
         remediations.append(
-            "Ansys Electronics Desktop Not Detected:\n"
-            "   Remediation: Ensure Ansys AEDT (2021.2 - 2024.2) is installed and ANSYSEM_ROOT<ver> is set."
+            "Ansys Electronics Desktop / Student Edition Not Detected:\n"
+            "   Remediation: Ensure Ansys AEDT or Ansys Student (v252 / 2025 R2 or 2021.2-2025.2+) is installed or running."
         )
 
     if not disk_ok:
