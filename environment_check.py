@@ -87,7 +87,7 @@ def run_check(verbose: bool = True) -> bool:
     if is_windows and not has_pyaedt:
         ready_for_hfss = False
         remediations.append(
-            "PyAEDT Not Installed:\n"
+            "PyAEDT (ansys.aedt.core) Not Installed:\n"
             f"   Remediation: Run '{sys.executable} -m pip install pyaedt'"
         )
 

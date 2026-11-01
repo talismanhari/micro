@@ -1,6 +1,7 @@
 """
 Unit tests for Ansys Student 2025 R2 (v252) version detection,
-PyAEDT 1.9.0 connection parameters, and safe desktop release behavior.
+PyAEDT (ansys.aedt.core) package detection and connection parameters,
+and safe desktop release behavior.
 """
 
 import os
@@ -52,6 +53,33 @@ def test_ansys_root252_env_detection(tmp_path):
         assert matching[0]["path"] == str(mock_em.resolve())
 
 
+def test_pyaedt_package_detection_via_ansys_aedt_core():
+    """
+    Verifies that SystemMonitor detects PyAEDT using ansys.aedt.core
+    and extracts version via importlib.metadata.version('pyaedt').
+    """
+    mock_spec = MagicMock()
+    with patch("importlib.util.find_spec", return_value=mock_spec), \
+         patch("importlib.metadata.version", return_value="1.9.0"):
+        info = SystemMonitor.inspect_environment()
+        assert info["pyaedt_version"] == "1.9.0"
+
+
+def test_pyaedt_package_not_installed():
+    """Verifies that SystemMonitor correctly reports 'Not Installed' when ansys.aedt.core is absent."""
+    with patch("importlib.util.find_spec", return_value=None):
+        info = SystemMonitor.inspect_environment()
+        assert info["pyaedt_version"] == "Not Installed"
+
+
+def test_missing_dependencies_checks_ansys_aedt_core():
+    """Verifies that check_missing_dependencies verifies ansys.aedt.core on Windows."""
+    with patch("platform.system", return_value="Windows"), \
+         patch("importlib.util.find_spec", return_value=None):
+        missing = SystemMonitor.check_missing_dependencies()
+        assert any("ansys.aedt.core" in m for m in missing)
+
+
 def test_hfss_setup_uses_student_grpc_settings():
     """
     Verifies that HFSSAutomation applies:
@@ -64,16 +92,16 @@ def test_hfss_setup_uses_student_grpc_settings():
     antenna_cfg, sim_cfg = main.load_configurations()
     hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
 
-    # Mock pyaedt
-    mock_pyaedt = MagicMock()
+    # Mock Hfss class and settings
     mock_hfss_cls = MagicMock()
-    mock_pyaedt.Hfss = mock_hfss_cls
-    mock_pyaedt.settings = MagicMock()
+    mock_settings = MagicMock()
 
     # Mock running process to trigger session reuse (new_desktop=False)
     mock_proc = [{"pid": 12345, "name": "ansysedt.exe"}]
 
-    with patch("src.hfss_setup.pyaedt", mock_pyaedt), \
+    with patch("src.hfss_setup.Hfss", mock_hfss_cls), \
+         patch("src.hfss_setup.settings", mock_settings), \
+         patch("src.hfss_setup.pyaedt_available", True), \
          patch.object(SystemMonitor, "check_running_aedt_processes", return_value=mock_proc), \
          patch.object(SystemMonitor, "detect_installed_aedt_versions", return_value=[{"version": "2025.2", "source": "test", "is_student": True}]):
 
@@ -81,7 +109,7 @@ def test_hfss_setup_uses_student_grpc_settings():
 
         # Verify environment & gRPC mode
         assert os.environ.get("PYAEDT_USE_PRE_GRPC_ARGS") == "True"
-        assert mock_pyaedt.settings.grpc_secure_mode is False
+        assert mock_settings.grpc_secure_mode is False
 
         # Verify Hfss call kwargs
         assert mock_hfss_cls.called

@@ -182,14 +182,20 @@ class SystemMonitor:
         """Checks for required Python runtime libraries."""
         missing = []
         core_packages = ["numpy", "matplotlib", "reportlab", "pytest", "psutil"]
-        if platform.system() == "Windows":
-            core_packages.append("pyaedt")
-
         for pkg in core_packages:
             try:
                 __import__(pkg)
             except ImportError:
                 missing.append(pkg)
+
+        if platform.system() == "Windows":
+            try:
+                import importlib.util
+                if importlib.util.find_spec("ansys.aedt.core") is None:
+                    missing.append("ansys.aedt.core (pyaedt)")
+            except Exception:
+                missing.append("ansys.aedt.core (pyaedt)")
+
         return missing
 
     @classmethod
@@ -225,11 +231,22 @@ class SystemMonitor:
         info["disk_total_gb"] = round(total_b / (1024 ** 3), 2)
         info["disk_free_gb"] = round(free_b / (1024 ** 3), 2)
 
-        # PyAEDT check
+        # PyAEDT check: verify ansys.aedt.core and get version via importlib.metadata
         try:
-            import pyaedt
-            info["pyaedt_version"] = pyaedt.__version__
-        except ImportError:
+            import importlib.util
+            import importlib.metadata
+            spec = importlib.util.find_spec("ansys.aedt.core")
+            if spec is not None:
+                try:
+                    info["pyaedt_version"] = importlib.metadata.version("pyaedt")
+                except importlib.metadata.PackageNotFoundError:
+                    try:
+                        info["pyaedt_version"] = importlib.metadata.version("ansys-aedt-core")
+                    except Exception:
+                        info["pyaedt_version"] = "1.9.0 (ansys.aedt.core)"
+            else:
+                info["pyaedt_version"] = "Not Installed"
+        except Exception:
             info["pyaedt_version"] = "Not Installed"
 
         # AEDT software detection

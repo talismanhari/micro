@@ -16,11 +16,21 @@ import logging
 os.environ["PYAEDT_USE_PRE_GRPC_ARGS"] = "True"
 
 try:
-    import pyaedt
-    # Configure gRPC mode before establishing desktop connection
-    pyaedt.settings.grpc_secure_mode = False
+    from ansys.aedt.core import Desktop, Hfss, settings
+    settings.grpc_secure_mode = False
+    pyaedt_available = True
 except ImportError:
-    pyaedt = None
+    try:
+        import pyaedt
+        from pyaedt import Desktop, Hfss
+        pyaedt.settings.grpc_secure_mode = False
+        settings = pyaedt.settings
+        pyaedt_available = True
+    except ImportError:
+        Desktop = None
+        Hfss = None
+        settings = None
+        pyaedt_available = False
 
 from src.geometry import AntennaGeometry
 from src.materials import MaterialManager
@@ -68,15 +78,16 @@ class HFSSAutomation:
         - new_desktop=False when reusing existing session
         - port=50051
         """
-        if pyaedt is None:
+        if not pyaedt_available or Hfss is None:
             raise RuntimeError(
-                "PyAEDT is not installed.\n"
+                "PyAEDT (ansys.aedt.core) is not installed.\n"
                 "To fix: Run 'pip install pyaedt' on the Windows simulation machine."
             )
 
         # Ensure gRPC settings are applied
         os.environ["PYAEDT_USE_PRE_GRPC_ARGS"] = "True"
-        pyaedt.settings.grpc_secure_mode = False
+        if settings is not None:
+            settings.grpc_secure_mode = False
 
         sim_env = self.sim_cfg.get("simulation_environment", {})
 
@@ -121,7 +132,7 @@ class HFSSAutomation:
         }
 
         try:
-            sig = inspect.signature(pyaedt.Hfss.__init__)
+            sig = inspect.signature(Hfss.__init__)
             params = sig.parameters
             if "specified_version" in params and "version" not in params:
                 init_kwargs["specified_version"] = init_kwargs.pop("version")
@@ -141,7 +152,7 @@ class HFSSAutomation:
         )
 
         try:
-            self.hfss = pyaedt.Hfss(**init_kwargs)
+            self.hfss = Hfss(**init_kwargs)
         except Exception as err:
             err_str = str(err)
             if "license" in err_str.lower():

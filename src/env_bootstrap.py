@@ -48,10 +48,10 @@ class EnvironmentBootstrapper:
         """Installs dependencies into the virtual environment only if they are missing."""
         # Check core packages
         check_code = (
-            "import sys; "
+            "import sys, importlib.util; "
             "pkgs = ['numpy', 'matplotlib', 'reportlab', 'pytest', 'psutil']; "
-            "pkgs += ['pyaedt'] if sys.platform == 'win32' else []; "
-            "missing = [p for p in pkgs if __import__('importlib.util').util.find_spec(p) is None]; "
+            "pkgs += ['ansys.aedt.core'] if sys.platform == 'win32' else []; "
+            "missing = [p for p in pkgs if importlib.util.find_spec(p) is None]; "
             "sys.exit(0 if not missing else 1)"
         )
         res = subprocess.run([str(python_exec), "-c", check_code], capture_output=True)
@@ -69,7 +69,7 @@ class EnvironmentBootstrapper:
         # On Windows, guarantee PyAEDT is installed
         if platform.system() == "Windows":
             check_pyaedt = subprocess.run(
-                [str(python_exec), "-c", "import pyaedt"], capture_output=True
+                [str(python_exec), "-c", "from ansys.aedt.core import Hfss"], capture_output=True
             )
             if check_pyaedt.returncode != 0:
                 print("[BOOTSTRAP] Installing PyAEDT for Windows HFSS simulation...")

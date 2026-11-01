@@ -29,8 +29,8 @@ Write-Host "[2/3] Checking dependencies..." -ForegroundColor Yellow
 & $VenvPython -m pip install --quiet --upgrade pip
 & $VenvPython -m pip install --quiet -r (Join-Path $ProjectRoot "requirements.txt")
 
-# Check PyAEDT on Windows
-$HasPyAEDT = & $VenvPython -c "import pyaedt" 2>$null
+# Check PyAEDT on Windows (using verified ansys.aedt.core import)
+$HasPyAEDT = & $VenvPython -c "from ansys.aedt.core import Hfss" 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing PyAEDT for Windows HFSS simulation..." -ForegroundColor Yellow
     & $VenvPython -m pip install pyaedt
