@@ -155,3 +155,59 @@ def test_prepare_model_only_does_not_call_analyze():
         mock_close.assert_called_once()
         # Verify setup.analyze was never called
         mock_app.analyze.assert_not_called()
+
+
+def test_create_box_pyaedt_190_signature():
+    """Verifies that _create_box passes origin, sizes, name, and material to PyAEDT 1.9.0 modeler."""
+    mock_modeler = MagicMock()
+    HFSSAutomation._create_box(
+        mock_modeler,
+        origin=[0, 0, 0],
+        sizes=[10, 20, 1.6],
+        name="TestBox",
+        material="FR4_epoxy"
+    )
+    mock_modeler.create_box.assert_called_once_with(
+        origin=[0, 0, 0],
+        sizes=[10, 20, 1.6],
+        name="TestBox",
+        material="FR4_epoxy"
+    )
+
+
+def test_material_exists_pyaedt_190_collection():
+    """Verifies that MaterialManager.material_exists correctly detects materials via PyAEDT 1.9.0 collection."""
+    from src.materials import MaterialManager
+
+    # Case 1: Collection membership (`name in materials`)
+    mock_materials_coll = {"fr4_epoxy": MagicMock(), "copper": MagicMock()}
+    assert MaterialManager.material_exists(mock_materials_coll, "FR4_epoxy") is False  # case check
+    assert MaterialManager.material_exists(mock_materials_coll, "copper") is True
+
+    # Case 2: material_keys attribute
+    class MockMaterialsObj:
+        material_keys = ["FR4_epoxy", "copper"]
+    mock_materials_keys = MockMaterialsObj()
+    assert MaterialManager.material_exists(mock_materials_keys, "FR4_epoxy") is True
+    assert MaterialManager.material_exists(mock_materials_keys, "fr4_epoxy") is True
+    assert MaterialManager.material_exists(mock_materials_keys, "aluminum") is False
+
+
+def test_assign_pyaedt_materials_avoids_duplicate():
+    """Verifies assign_pyaedt_materials avoids duplicate material creation."""
+    from src.materials import MaterialManager
+
+    mat_mgr = MaterialManager({
+        "substrate": {"material": "FR4_epoxy", "relative_permittivity": 4.4, "dielectric_loss_tangent": 0.02},
+        "metallization": {"material": "copper", "conductivity_siemens_per_m": 5.8e7}
+    })
+
+    mock_app = MagicMock()
+    mock_materials = MagicMock()
+    mock_materials.__contains__.side_effect = lambda item: item in ["FR4_epoxy", "copper"]
+    mock_app.materials = mock_materials
+
+    success = mat_mgr.assign_pyaedt_materials(mock_app)
+    assert success is True
+    mock_materials.add_material.assert_not_called()
+

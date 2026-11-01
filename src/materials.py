@@ -1,6 +1,6 @@
 """
 Material definitions and validation module for UWB Antenna Engineering.
-Compatible with both standalone verification and PyAEDT material assignment.
+Compatible with both standalone verification and PyAEDT 1.9.0 material assignment.
 """
 
 from typing import Dict, Any, Optional
@@ -53,18 +53,81 @@ class MaterialManager:
         )
         return True
 
+    @staticmethod
+    def material_exists(materials, mat_name: str) -> bool:
+        """
+        Checks if a material exists in the PyAEDT Materials library or active project.
+        Supports PyAEDT 1.9.0 collection/dictionary interface and legacy fallbacks.
+        Avoids calling obsolete methods like checkifmaterialexists.
+        """
+        # 1. Direct collection membership: `mat_name in materials` (PyAEDT 1.x standard)
+        try:
+            if mat_name in materials:
+                return True
+        except (TypeError, AttributeError):
+            pass
+
+        # 2. Case-insensitive lookup in material_keys
+        try:
+            if hasattr(materials, "material_keys") and materials.material_keys:
+                keys_lower = [str(k).lower() for k in materials.material_keys]
+                if mat_name.lower() in keys_lower:
+                    return True
+        except Exception:
+            pass
+
+        # 3. Check materials dictionary / mapping
+        try:
+            if hasattr(materials, "materials") and materials.materials:
+                if mat_name in materials.materials or mat_name.lower() in [str(m).lower() for m in materials.materials]:
+                    return True
+        except Exception:
+            pass
+
+        # 4. Check check_material_exists method (if available in some PyAEDT versions)
+        if hasattr(materials, "check_material_exists") and callable(materials.check_material_exists):
+            try:
+                return bool(materials.check_material_exists(mat_name))
+            except Exception:
+                pass
+
+        # 5. Legacy checkifmaterialexists (pre-1.0 fallback)
+        if hasattr(materials, "checkifmaterialexists") and callable(materials.checkifmaterialexists):
+            try:
+                return bool(materials.checkifmaterialexists(mat_name))
+            except Exception:
+                pass
+
+        return False
+
     def assign_pyaedt_materials(self, hfss_app) -> bool:
         """
-        Create and assign materials in native HFSS project via PyAEDT.
-        Safe to call on Windows HFSS environment.
+        Create and assign materials in native HFSS project via PyAEDT 1.9.0.
+        Preserves FR4_epoxy (eps=4.4, tand=0.02) and copper properties.
+        Avoids duplicate material creation.
         """
         try:
+            materials = hfss_app.materials
             mat_name = self.substrate_name
-            if not hfss_app.materials.checkifmaterialexists(mat_name):
+
+            if not self.material_exists(materials, mat_name):
                 logger.info(f"Adding custom substrate material '{mat_name}' in HFSS...")
-                mat = hfss_app.materials.add_material(mat_name)
+                mat = materials.add_material(mat_name)
                 mat.permittivity = self.relative_permittivity
                 mat.dielectric_loss_tangent = self.dielectric_loss_tangent
+                logger.info(f"Configured '{mat_name}': eps_r={self.relative_permittivity}, tand={self.dielectric_loss_tangent}")
+            else:
+                logger.info(f"Material '{mat_name}' already exists in HFSS. Avoiding duplicate creation.")
+
+            # Conductor material (copper)
+            met_name = self.metallization_name
+            if not self.material_exists(materials, met_name):
+                logger.info(f"Adding conductor material '{met_name}' in HFSS...")
+                cop = materials.add_material(met_name)
+                cop.conductivity = self.copper_conductivity
+            else:
+                logger.info(f"Conductor material '{met_name}' exists in HFSS.")
+
             return True
         except Exception as e:
             logger.warning(f"PyAEDT material assignment encountered warning/error: {e}")

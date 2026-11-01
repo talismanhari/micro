@@ -176,6 +176,51 @@ class HFSSAutomation:
         logger.info(f"HFSS connected. Project: {self.hfss.project_name}, Design: {self.hfss.design_name}, Units: mm")
         return self.hfss
 
+    @staticmethod
+    def _create_box(modeler, origin, sizes, name: str, material: str):
+        """
+        Creates a 3D box supporting PyAEDT 1.9.0 (origin, sizes, name, material)
+        as well as legacy PyAEDT calling conventions.
+        """
+        try:
+            return modeler.create_box(origin=origin, sizes=sizes, name=name, material=material)
+        except TypeError:
+            try:
+                return modeler.create_box(origin, sizes, name=name, material=material)
+            except TypeError:
+                try:
+                    return modeler.create_box(position=origin, dimensions_list=sizes, name=name, matname=material)
+                except TypeError:
+                    return modeler.create_box(origin, sizes, name=name, matname=material)
+
+    @staticmethod
+    def _create_polyline(modeler, points, name: str, cover_surface: bool = True):
+        """
+        Creates a polyline supporting PyAEDT 1.9.0 (points, name, cover_surface)
+        and legacy PyAEDT (position_list, name, cover_surface).
+        """
+        try:
+            return modeler.create_polyline(points=points, name=name, cover_surface=cover_surface)
+        except TypeError:
+            try:
+                return modeler.create_polyline(position_list=points, name=name, cover_surface=cover_surface)
+            except TypeError:
+                return modeler.create_polyline(points, name=name, cover_surface=cover_surface)
+
+    @staticmethod
+    def _create_rectangle(modeler, cs_plane, origin, sizes, name: str):
+        """
+        Creates a rectangle supporting PyAEDT 1.9.0 (cs_plane, origin, sizes, name)
+        and legacy PyAEDT (csPlane, position, dimension_list, name).
+        """
+        try:
+            return modeler.create_rectangle(cs_plane=cs_plane, origin=origin, sizes=sizes, name=name)
+        except TypeError:
+            try:
+                return modeler.create_rectangle(csPlane=cs_plane, position=origin, dimension_list=sizes, name=name)
+            except TypeError:
+                return modeler.create_rectangle(cs_plane, origin, sizes, name=name)
+
     def build_model(self, config_type: str = "Type_A", param: Optional[float] = None):
         """Builds substrate, grounds, feed line, patch, air box, boundaries, and ports."""
         if not self.hfss:
@@ -188,31 +233,34 @@ class HFSSAutomation:
 
         # 2. Substrate
         sub = self.geom.substrate_box
-        m.create_box(
-            position=sub["origin"],
-            dimensions_list=sub["size"],
+        self._create_box(
+            m,
+            origin=sub["origin"],
+            sizes=sub["size"],
             name="Substrate",
-            matname=self.materials.substrate_name
+            material=self.materials.substrate_name
         )
         logger.info("Created Substrate box.")
 
         # 3. Coplanar Ground Planes
         for g in self.geom.ground_planes:
-            m.create_box(
-                position=g["origin"],
-                dimensions_list=g["size"],
+            self._create_box(
+                m,
+                origin=g["origin"],
+                sizes=g["size"],
                 name=g["name"],
-                matname=self.materials.metallization_name
+                material=self.materials.metallization_name
             )
         logger.info("Created CPW Ground Planes.")
 
         # 4. Feed Line
         fl = self.geom.feed_line
-        m.create_box(
-            position=fl["origin"],
-            dimensions_list=fl["size"],
+        self._create_box(
+            m,
+            origin=fl["origin"],
+            sizes=fl["size"],
             name=fl["name"],
-            matname=self.materials.metallization_name
+            material=self.materials.metallization_name
         )
         logger.info("Created CPW Feed Line.")
 
@@ -220,10 +268,11 @@ class HFSSAutomation:
         poly_pts = self.geom.get_patch_polygon(config_type, param)
         pts_3d = [[p[0], p[1], 0.0] for p in poly_pts]
 
-        patch_sheet = m.create_polyline(
-            position_list=pts_3d,
-            cover_surface=True,
-            name=f"Patch_{config_type}"
+        patch_sheet = self._create_polyline(
+            m,
+            points=pts_3d,
+            name=f"Patch_{config_type}",
+            cover_surface=True
         )
         m.thicken_sheet(patch_sheet.name, self.geom.copper_t)
         patch_sheet.material_name = self.materials.metallization_name
@@ -231,21 +280,23 @@ class HFSSAutomation:
 
         # 6. Radiation Air Box & Boundary
         ab = self.geom.get_air_box(margin_mm=self.sim_cfg.get("air_box", {}).get("margin_mm", 25.0))
-        air_obj = m.create_box(
-            position=ab["origin"],
-            dimensions_list=ab["size"],
+        air_obj = self._create_box(
+            m,
+            origin=ab["origin"],
+            sizes=ab["size"],
             name=ab["name"],
-            matname="air"
+            material="air"
         )
         self.hfss.assign_radiation_boundary_to_objects(air_obj.name)
         logger.info("Created Air Box and assigned Radiation Boundary.")
 
         # 7. Lumped Port Excitation (handles both Terminal and DrivenModal solutions)
         port_info = self.geom.lumped_port_sheet
-        port_sheet = m.create_rectangle(
-            csPlane=port_info["plane"],
-            position=port_info["origin"],
-            dimension_list=[port_info["size"][0], port_info["size"][2]],
+        port_sheet = self._create_rectangle(
+            m,
+            cs_plane=port_info["plane"],
+            origin=port_info["origin"],
+            sizes=[port_info["size"][0], port_info["size"][2]],
             name=port_info["name"]
         )
         port_name = self.sim_cfg.get("excitation", {}).get("port_name", "P1_CPW")
