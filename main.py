@@ -150,15 +150,22 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
     if force_simulate:
         can_access_hfss = True
 
+    should_solve = False
     if can_access_hfss:
         print("\n[PHASE 3] Ansys HFSS Connection & Antenna Model Preparation")
         print("  Connecting to HFSS session (port: 50051 / Student 2025 R2)...")
         prep_res = runner.prepare_model_only(config_type="Type_A")
-        if prep_res.get("status") == "MODEL_PREPARED":
-            print(f"  ✓ Antenna model prepared in HFSS (Project: {prep_res.get('project_name')}, Design: {prep_res.get('design_name')}).")
-            print("  ✓ Materials, CPW feed, ground planes, lumped port, and radiation air box assigned.")
-        else:
-            print(f"  ⚠ Model preparation notice: {prep_res.get('error', 'Status: ' + str(prep_res.get('status')))}")
+        if prep_res.get("status") != "MODEL_PREPARED":
+            err_msg = prep_res.get("error", f"Status: {prep_res.get('status')}")
+            print(f"\n  ✗ HFSS MODEL PREPARATION FAILED: {err_msg}")
+            print("=" * 75)
+            print("   WORKFLOW FAILED: HFSS model preparation did not succeed.")
+            print("   Action: Ensure PyAEDT 1.9.0 is installed and AEDT session is listening on port 50051.")
+            print("=" * 75)
+            sys.exit(1)
+
+        print(f"  ✓ Antenna model prepared in HFSS (Project: {prep_res.get('project_name')}, Design: {prep_res.get('design_name')}).")
+        print("  ✓ Materials, CPW feed, ground planes, lumped port, and radiation air box assigned.")
 
         # 4. Planned Simulation Review & Safe Stop Before Solving
         print("\n[PHASE 4] Simulation Review & Resource Safety Gate")
@@ -173,7 +180,6 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
         print("               Est: ~30-45 min | ~2.0 GB RAM | Resonance Merging Study")
         print("  Safety Guard: 1 simulation at a time. Safe stop before solve enabled.")
 
-        should_solve = False
         if prepare_only:
             print("\n  ℹ Stopping safely before solve (--prepare-only mode active).")
         elif auto_confirm:
@@ -188,14 +194,27 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
             except (EOFError, KeyboardInterrupt):
                 print("\n  ℹ Stopped safely before solve.")
 
-        if should_solve:
-            print("\n[PHASE 4B] Executing Ansys HFSS Multi-Stage Pipeline...")
-            sweep_mgr = ParameterSweepManager(antenna_cfg, sim_cfg)
-            sim_success = sweep_mgr.execute_full_pipeline()
-            if not sim_success:
-                logger.warning("HFSS simulation did not complete all stages. Preserving completed results.")
-            else:
-                print("  ✓ All HFSS simulation stages completed successfully.")
+        if not should_solve:
+            print("\n" + "=" * 75)
+            print("   HFSS MODEL PREPARATION COMPLETED SUCCESSFULLY")
+            print(f"   Project: {prep_res.get('project_name')}")
+            print(f"   Design:  {prep_res.get('design_name')}")
+            print("   Status:  Model geometry, materials, port, and air box prepared.")
+            print("   Notice:  Safe stop before solve active. No solve was executed.")
+            print("            Simulation report withheld (not claiming simulated bandwidth).")
+            print("=" * 75)
+            return
+
+        print("\n[PHASE 4B] Executing Ansys HFSS Multi-Stage Pipeline...")
+        sweep_mgr = ParameterSweepManager(antenna_cfg, sim_cfg)
+        sim_success = sweep_mgr.execute_full_pipeline()
+        if not sim_success:
+            print("\n  ✗ HFSS simulation pipeline failed or was interrupted.")
+            print("=" * 75)
+            print("   WORKFLOW FAILED: Simulation did not complete all stages.")
+            print("=" * 75)
+            sys.exit(1)
+        print("  ✓ All HFSS simulation stages completed successfully.")
     else:
         print("\n[PHASE 3] Simulation Mode Notice:")
         if not is_windows:
@@ -263,7 +282,10 @@ def run_one_command_workflow(auto_confirm: bool = False, force_simulate: bool = 
             print(f"    Published BW: {comp.get('published_bw_mhz')} MHz | Calculated: {comp.get('calculated_from_limits_bw_mhz')} MHz")
             print(f"    Discrepancy: {comp.get('published_vs_calculated_discrepancy_mhz')} MHz")
             if "simulated_bw_mhz" in comp:
-                print(f"    Simulated BW: {comp.get('simulated_bw_mhz')} MHz")
+                if should_solve:
+                    print(f"    Simulated BW: {comp.get('simulated_bw_mhz')} MHz")
+                else:
+                    print(f"    Reference Benchmark BW: {comp.get('simulated_bw_mhz')} MHz (Analytical/Literature, not simulated)")
 
     # 8. PDF Report Generation
     print("\n[PHASE 7] Compiling College-Grade Engineering PDF Report")

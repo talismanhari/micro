@@ -168,11 +168,26 @@ def test_create_box_pyaedt_190_signature():
         material="FR4_epoxy"
     )
     mock_modeler.create_box.assert_called_once_with(
-        origin=[0, 0, 0],
-        sizes=[10, 20, 1.6],
+        [0, 0, 0],
+        [10, 20, 1.6],
         name="TestBox",
         material="FR4_epoxy"
     )
+
+
+def test_main_reports_preparation_failure_as_failure():
+    """Verifies that main workflow fails immediately if HFSS preparation fails."""
+    with patch("platform.system", return_value="Windows"), \
+         patch("src.system_monitor.SystemMonitor.detect_installed_aedt_versions", return_value=[{"version": "2025.2", "is_student": True}]), \
+         patch("src.system_monitor.SystemMonitor.check_running_aedt_processes", return_value=[{"pid": 12345}]), \
+         patch("importlib.util.find_spec", return_value=MagicMock()), \
+         patch("src.simulation.SimulationRunner.prepare_model_only", return_value={"status": "FAILED", "error": "PyAEDT Connection Timeout"}), \
+         pytest.raises(SystemExit) as exc_info:
+
+        main.run_one_command_workflow(force_simulate=True)
+
+    assert exc_info.value.code == 1
+
 
 
 def test_material_exists_pyaedt_190_collection():

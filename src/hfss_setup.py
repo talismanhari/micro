@@ -183,10 +183,10 @@ class HFSSAutomation:
         as well as legacy PyAEDT calling conventions.
         """
         try:
-            return modeler.create_box(origin=origin, sizes=sizes, name=name, material=material)
+            return modeler.create_box(origin, sizes, name=name, material=material)
         except TypeError:
             try:
-                return modeler.create_box(origin, sizes, name=name, material=material)
+                return modeler.create_box(origin=origin, sizes=sizes, name=name, material=material)
             except TypeError:
                 try:
                     return modeler.create_box(position=origin, dimensions_list=sizes, name=name, matname=material)
