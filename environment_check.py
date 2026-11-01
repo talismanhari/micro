@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Environment inspection and diagnostic tool for UWB Antenna Engineering.
+Comprehensive environment inspection and diagnostic tool for UWB Antenna Engineering.
 Executes on both macOS development machine and Windows Lenovo LOQ simulation laptop.
+Detects operating system, Python, PyAEDT, installed Ansys AEDT versions, license, and processes.
 """
 
 import sys
@@ -17,48 +18,99 @@ if str(ROOT) not in sys.path:
 from src.system_monitor import SystemMonitor
 
 
-def run_check():
-    print("=" * 65)
-    print("   UWB ANTENNA ENGINEERING — ENVIRONMENT & HARDWARE CHECK")
-    print("=" * 65)
-
+def run_check(verbose: bool = True) -> bool:
+    """
+    Runs complete diagnostic evaluation.
+    Returns True if system is fully ready for HFSS simulation, False otherwise.
+    """
     info = SystemMonitor.inspect_environment()
-
-    print(f" Operating System  : {info['os_name']} {info['os_release']} ({info['os_version'][:30]}...)")
-    print(f" Architecture      : {info['machine']} ({info['processor'] or 'ARM64/x86_64'})")
-    print(f" Python Version    : {info['python_version']} ({info['python_executable']})")
-    print(f" PyAEDT Version    : {info['pyaedt_version']}")
-    print(f" Total RAM (GB)    : {info['total_ram_gb']}")
-    print(f" Available RAM (GB): {info['available_ram_gb']}")
-    print(f" RAM Usage (%)     : {info['ram_used_percent']}%")
-    print(f" Disk Total (GB)   : {info['disk_total_gb']}")
-    print(f" Disk Free (GB)    : {info['disk_free_gb']}")
-    print("-" * 65)
-
-    # Status assessments
     is_windows = (info["os_name"] == "Windows")
     has_pyaedt = (info["pyaedt_version"] != "Not Installed")
-    disk_ok = (isinstance(info["disk_free_gb"], (int, float)) and info["disk_free_gb"] >= 10.0)
+    aedt_installs = info.get("aedt_installed", [])
+    running_aedt = info.get("aedt_running_processes", [])
+    lic_info = info.get("license_info", {})
+    missing_deps = info.get("missing_dependencies", [])
+    disk_free = info["disk_free_gb"]
+    disk_ok = (isinstance(disk_free, (int, float)) and disk_free >= 10.0)
 
-    print("\n[DIAGNOSTIC STATUS]")
-    if is_windows:
-        print("  ✓ Platform: Windows simulation host detected.")
-        if has_pyaedt:
-            print("  ✓ PyAEDT: Installed and ready for HFSS automation.")
+    # Check project directories and configuration files
+    configs_ok = (ROOT / "configs" / "antenna_parameters.json").exists() and (ROOT / "configs" / "simulation_settings.json").exists()
+
+    # Check existing results
+    raw_results = list((ROOT / "results" / "raw").glob("*.csv")) if (ROOT / "results" / "raw").exists() else []
+    existing_aedt = list((ROOT / "hfss_projects").rglob("*.aedt")) if (ROOT / "hfss_projects").exists() else []
+
+    if verbose:
+        print("=" * 70)
+        print("   UWB ANTENNA ENGINEERING — SYSTEM DIAGNOSTIC & PRE-FLIGHT CHECK")
+        print("=" * 70)
+        print(f" Operating System       : {info['os_name']} {info['os_release']} ({info['machine']})")
+        print(f" Python Version         : {info['python_version']} ({'Virtualenv' if info['in_virtualenv'] else 'Global System'})")
+        print(f" Python Executable      : {info['python_executable']}")
+        print(f" PyAEDT Version         : {info['pyaedt_version']}")
+        aedt_summary = ', '.join([f"{d['version']} ({d['source']})" for d in aedt_installs]) if aedt_installs else 'None Detected'
+        active_proc_summary = f"Running (PID {running_aedt[0]['pid']})" if running_aedt else 'None (will auto-launch)'
+        print(f" Installed Ansys AEDT   : {aedt_summary}")
+        print(f" Active AEDT Processes  : {active_proc_summary}")
+        print(f" License Configured     : {'Yes' if lic_info.get('license_configured') else 'Default / Unset'}")
+        print(f" System RAM             : {info['available_ram_gb']} GB available / {info['total_ram_gb']} GB total ({info['ram_used_percent']}% used)")
+        print(f" Free Storage           : {disk_free} GB available / {info['disk_total_gb']} GB total")
+        print(f" Config Files Valid     : {'Yes' if configs_ok else 'Missing configs/'}")
+        print(f" Previous Results Found : {len(raw_results)} CSV datasets, {len(existing_aedt)} .aedt projects")
+        print("-" * 70)
+
+    # Readiness Assessment
+    remediations = []
+    ready_for_hfss = True
+
+    if not is_windows:
+        ready_for_hfss = False
+        remediations.append(
+            "Platform Note: macOS development machine detected.\n"
+            "   Ansys HFSS simulations must run natively on the Windows Lenovo LOQ laptop.\n"
+            "   macOS is used for static geometry checks, test suite, and report compilation."
+        )
+
+    if missing_deps:
+        ready_for_hfss = False
+        remediations.append(
+            f"Missing Python Packages: {', '.join(missing_deps)}\n"
+            f"   Remediation: Run '{sys.executable} -m pip install -r requirements.txt'"
+        )
+
+    if is_windows and not has_pyaedt:
+        ready_for_hfss = False
+        remediations.append(
+            "PyAEDT Not Installed:\n"
+            f"   Remediation: Run '{sys.executable} -m pip install pyaedt'"
+        )
+
+    if is_windows and not aedt_installs:
+        ready_for_hfss = False
+        remediations.append(
+            "Ansys Electronics Desktop Not Detected:\n"
+            "   Remediation: Ensure Ansys AEDT (2021.2 - 2024.2) is installed and ANSYSEM_ROOT<ver> is set."
+        )
+
+    if not disk_ok:
+        ready_for_hfss = False
+        remediations.append(
+            f"Low Disk Space: {disk_free} GB free (minimum required is 10.0 GB for HFSS mesh).\n"
+            "   Remediation: Free up storage on current volume before meshing."
+        )
+
+    if verbose:
+        if ready_for_hfss:
+            print("  ✓ STATUS: SYSTEM FULLY READY FOR HFSS SIMULATION")
         else:
-            print("  ✗ PyAEDT: NOT installed. Run 'pip install pyaedt' in virtual environment.")
-    else:
-        print("  ℹ Platform: macOS/Linux development host detected.")
-        print("    Native Ansys HFSS simulations must run on the Windows machine.")
-        print("    Static validation, geometry generation, testing, and report compilation are available here.")
+            print("  ℹ STATUS: PRE-FLIGHT NOTICES / REMEDIATION REQUIRED:")
+            for r in remediations:
+                print(f"    • {r}")
+        print("=" * 70)
 
-    if disk_ok:
-        print(f"  ✓ Storage: Sufficient disk space ({info['disk_free_gb']} GB available >= 10.0 GB).")
-    else:
-        print(f"  ⚠ Storage: Low disk space ({info['disk_free_gb']} GB). Minimum 10 GB recommended for HFSS mesh.")
-
-    print("=" * 65)
+    return ready_for_hfss
 
 
 if __name__ == "__main__":
-    run_check()
+    ready = run_check(verbose=True)
+    sys.exit(0 if ready else 1)

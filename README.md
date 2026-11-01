@@ -75,39 +75,32 @@ Output deliverables generated on MacBook:
 
 ---
 
-## 5. Quick Start — Windows Lenovo LOQ (HFSS Simulation)
+## 5. Quick Start — Windows Lenovo LOQ (One-Command HFSS Execution)
 
-### Prerequisites on Windows
-1. Ansys Electronics Desktop (AEDT) installed (2022.2 or later).
-2. Python 3.10+ and Git for Windows.
-3. HFSS license active.
+### Target Workflow from VS Code Terminal
+Simply pull changes and run:
 
-### Execution Steps
 ```powershell
-# 1. Open PowerShell / Command Prompt and clone
-git clone <your-github-repo-url>
-cd UWB_ANTENNA_ENGINEERING
-
-# 2. Create and activate virtual environment
-python -m venv .venv
-.venv\Scripts\activate
-
-# 3. Install PyAEDT and dependencies
-pip install -r requirements.txt
-pip install pyaedt
-
-# 4. Run environment & hardware safety check
-python environment_check.py
-
-# 5. Execute 4-Stage Simulation Pipeline in HFSS
-python main.py --mode simulate --stage all
+python main.py
 ```
 
-### 4-Stage Execution Order
-- **Stage 1:** Type A baseline.
-- **Stage 2:** Type C Target ($\text{RAD} = 10.2\text{ mm}$).
-- **Stage 3:** Type B straight cuts ($3\text{ mm}, 5\text{ mm}, 7\text{ mm}$).
-- **Stage 4:** Type C full parameter sweep ($\text{RAD} = 13\text{ mm}, 12\text{ mm}, 11\text{ mm}, 10\text{ mm}$).
+### What `python main.py` coordinates automatically:
+1. **Self-Bootstrapping:** Automatically creates `.venv`, installs requirements from `requirements.txt`, installs `pyaedt`, and invokes the virtual environment.
+2. **Environment & License Inspection:** Checks Windows, Python version, RAM, free disk space (≥ 10 GB), installed Ansys AEDT versions, and active `ansysedt.exe` processes.
+3. **Static Engineering Validation:** Verifies antenna dimensions, materials (FR4, copper), and geometries before solving.
+4. **HFSS Connection:** Connects to an existing AEDT session or launches a new background desktop instance without opening redundant processes.
+5. **Parametric Model Build:** Builds Substrate, Ground Planes, Feed, Radiating Patch, 50 $\Omega$ CPW Lumped Port, and Radiation Air Box.
+6. **Solution & Adaptive Mesh:** DrivenModal setup at 7.5 GHz with Delta S = 0.02, frequency sweep 1.0–14.0 GHz.
+7. **Simulation Solve (4-Stage Pipeline):**
+   - **Stage 1:** Type A baseline.
+   - **Stage 2:** Type C Target ($\text{RAD} = 10.2\text{ mm}$).
+   - **Stage 3:** Type B straight cuts ($3\text{ mm}, 5\text{ mm}, 7\text{ mm}$).
+   - **Stage 4:** Type C full parameter sweep ($\text{RAD} = 13\text{ mm}, 12\text{ mm}, 11\text{ mm}, 10\text{ mm}$).
+8. **Data Extraction & Results:** Automatically exports raw CSV datasets and saves `.aedt` project files.
+9. **Post-Processing & VSWR:** Detects physical $S_{11} < -10\text{ dB}$ crossings, calculates fractional bandwidths, and flags published literature discrepancies.
+10. **Report Compilation:** Generates final PDF report at `report/final_report.pdf`.
+
+*(Optional PowerShell Launcher: `.\run_antenna.ps1 -Yes`)*
 
 ---
 

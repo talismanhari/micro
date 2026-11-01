@@ -1,0 +1,2 @@
+band_index,published_f_lower_ghz,published_f_upper_ghz,published_bw_mhz,calculated_from_limits_bw_mhz,published_vs_calculated_discrepancy_mhz,simulated_f_lower_ghz,simulated_f_upper_ghz,simulated_bw_mhz,sim_vs_published_diff_mhz
+1,3.0526,12.0,9124.7,8947.4,177.3,1.0,2.3,1300.0,-7824.7

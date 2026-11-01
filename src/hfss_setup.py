@@ -2,6 +2,7 @@
 HFSS automation setup module using PyAEDT.
 Builds the complete parametric 3D electromagnetic model:
 Substrate, Ground Planes, Feed Line, Truncated Patch, Lumped Port, Air Box, and Solution Setup.
+Includes intelligent session detection, auto-launching, and version auto-selection.
 """
 
 import os
@@ -11,6 +12,7 @@ import logging
 
 from src.geometry import AntennaGeometry
 from src.materials import MaterialManager
+from src.system_monitor import SystemMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -26,45 +28,71 @@ class HFSSAutomation:
         self.hfss = None
 
     @staticmethod
-    def detect_aedt_version() -> Optional[str]:
-        """Detects installed AEDT version from environment variables or registry."""
-        for v in ["2024.2", "2024.1", "2023.2", "2023.1", "2022.2"]:
-            env_var = f"ANSYSEM_ROOT{v.replace('.', '')}"
-            if env_var in os.environ:
-                logger.info(f"Detected AEDT installation: {v} at {os.environ[env_var]}")
-                return v
+    def get_preferred_aedt_version() -> Optional[str]:
+        """Detects installed AEDT version from system monitor."""
+        detected = SystemMonitor.detect_installed_aedt_versions()
+        if detected:
+            ver = detected[0]["version"]
+            logger.info(f"Targeting installed AEDT version: {ver} ({detected[0]['source']})")
+            return ver
         return None
 
-    def initialize_hfss(self, project_path: str, design_name: str = "UWB_Antenna", non_graphical: bool = True):
+    def initialize_hfss(self, project_path: str, design_name: str = "UWB_Antenna", non_graphical: Optional[bool] = None):
         """
-        Connects to or launches Ansys HFSS via PyAEDT.
+        Connects to an existing AEDT session or launches a new one automatically.
         Executed on Windows Simulation Machine.
         """
         try:
             from pyaedt import Hfss
         except ImportError as e:
             raise RuntimeError(
-                "PyAEDT is not installed. Native HFSS simulations must run on the Windows machine with Ansys AEDT."
+                "PyAEDT is not installed.\n"
+                "To fix: Run 'pip install pyaedt' on the Windows simulation machine."
             ) from e
 
         project_file = Path(project_path).resolve()
         project_file.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Initializing HFSS for project: {project_file} (Design: {design_name})")
+        # Check if AEDT is already running
+        running = SystemMonitor.check_running_aedt_processes()
+        reuse_session = len(running) > 0
+        if reuse_session:
+            logger.info(f"Active AEDT process detected (PID: {running[0]['pid']}). Connecting to existing session.")
+        else:
+            logger.info("No active AEDT session detected. Launching Ansys Electronics Desktop automatically...")
 
-        # Launch HFSS
-        self.hfss = Hfss(
-            projectname=str(project_file),
-            designname=design_name,
-            solution_type=self.sim_cfg.get("simulation_environment", {}).get("solution_type", "DrivenModal"),
-            specified_version=self.detect_aedt_version(),
-            non_graphical=non_graphical,
-            new_desktop_session=False,
-            close_on_exit=False
-        )
+        if non_graphical is None:
+            non_graphical = self.sim_cfg.get("simulation_environment", {}).get("non_graphical", True)
+
+        aedt_version = self.get_preferred_aedt_version()
+
+        try:
+            self.hfss = Hfss(
+                projectname=str(project_file),
+                designname=design_name,
+                solution_type=self.sim_cfg.get("simulation_environment", {}).get("solution_type", "DrivenModal"),
+                specified_version=aedt_version,
+                non_graphical=non_graphical,
+                new_desktop_session=(not reuse_session),
+                close_on_exit=False
+            )
+        except Exception as err:
+            err_str = str(err)
+            if "license" in err_str.lower():
+                raise RuntimeError(
+                    f"Ansys License Error: {err}\n"
+                    "Action: Verify Ansys license server configuration (ANSYSLMD_LICENSE_FILE / ANSYSLI_SERVERS)."
+                ) from err
+            elif "version" in err_str.lower():
+                raise RuntimeError(
+                    f"AEDT Version Mismatch: {err}\n"
+                    f"Action: Ensure PyAEDT version matches installed AEDT ({aedt_version})."
+                ) from err
+            else:
+                raise RuntimeError(f"Failed to connect to Ansys Electronics Desktop: {err}") from err
 
         self.hfss.modeler.model_units = "mm"
-        logger.info("HFSS modeler initialized with units: mm")
+        logger.info(f"HFSS connected. Project: {project_file.name}, Design: {design_name}, Units: mm")
         return self.hfss
 
     def build_model(self, config_type: str = "Type_A", param: Optional[float] = None):
@@ -105,7 +133,6 @@ class HFSSAutomation:
         logger.info("Created CPW Feed Line.")
 
         # 4. Radiating Patch
-        # Construct 2D polygon sheet and thicken, or create directly
         poly_pts = self.geom.get_patch_polygon(config_type, param)
         pts_3d = [[p[0], p[1], 0.0] for p in poly_pts]
 
@@ -114,7 +141,6 @@ class HFSSAutomation:
             cover_surface=True,
             name=f"Patch_{config_type}"
         )
-        # Assign copper finite conductivity or 3D thicken
         m.thicken_sheet(patch_sheet.name, self.geom.copper_t)
         patch_sheet.material_name = self.materials.metallization_name
         logger.info(f"Created Radiating Patch: {config_type} (param={param}).")
@@ -132,16 +158,12 @@ class HFSSAutomation:
 
         # 6. Lumped Port Excitation
         port_info = self.geom.lumped_port_sheet
-        # Create rectangular port sheet at input face (y = 0)
         port_sheet = m.create_rectangle(
             csPlane=port_info["plane"],
             position=port_info["origin"],
             dimension_list=[port_info["size"][0], port_info["size"][2]],
             name=port_info["name"]
         )
-        # Create lumped port with integration line from ground edge to feed center
-        line_start = [-(self.geom.feed_wid / 2.0 + self.geom.feed_to_gnd_gap), 0.0, 0.0]
-        line_end = [0.0, 0.0, 0.0]
         self.hfss.create_lumped_port_to_sheet(
             sheet_name=port_sheet.name,
             axisdir=0,
@@ -193,8 +215,11 @@ class HFSSAutomation:
             logger.info("HFSS project successfully saved.")
 
     def close(self):
-        """Closes HFSS design session cleanly."""
+        """Closes HFSS design session cleanly without terminating background AEDT desktop if shared."""
         if self.hfss:
-            self.hfss.release_desktop(close_projects=True, close_desktop=False)
+            try:
+                self.hfss.release_desktop(close_projects=True, close_desktop=False)
+            except Exception as e:
+                logger.warning(f"Error releasing HFSS desktop: {e}")
             self.hfss = None
-            logger.info("HFSS desktop session released.")
+            logger.info("HFSS design session released.")
