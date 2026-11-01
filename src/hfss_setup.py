@@ -549,13 +549,38 @@ class HFSSAutomation:
 
         # 5. Verify Frequency Sweep (exactly one sweep in setup)
         setup_sweeps = getattr(self.hfss, "setup_sweeps_names", None)
-        if isinstance(setup_sweeps, dict) and setup_name in setup_sweeps:
-            sweeps_in_setup = setup_sweeps.get(setup_name, [])
+        sweeps_in_setup = None
+
+        if isinstance(setup_sweeps, dict):
+            val = setup_sweeps.get(setup_name)
+            if isinstance(val, dict):
+                sweeps_in_setup = val.get("Sweeps", [])
+            elif isinstance(val, list):
+                sweeps_in_setup = val
+            elif "Sweeps" in setup_sweeps:
+                sweeps_in_setup = setup_sweeps["Sweeps"]
+
+        if sweeps_in_setup is None:
+            for s in getattr(self.hfss, "setups", []):
+                if getattr(s, "name", "") == setup_name:
+                    sweeps_in_setup = [getattr(sw, "name", str(sw)) for sw in getattr(s, "sweeps", [])]
+                    break
+
+        if sweeps_in_setup is not None:
             if sweep_name not in sweeps_in_setup:
-                raise RuntimeError(f"HFSS model validation failed: sweep '{sweep_name}' not found in setup '{setup_name}' sweeps {sweeps_in_setup}.")
+                raise RuntimeError(
+                    f"HFSS model validation failed: sweep '{sweep_name}' not found in setup '{setup_name}' sweeps {sweeps_in_setup}."
+                )
             if len(sweeps_in_setup) > 1:
-                raise RuntimeError(f"HFSS model validation failed: duplicate sweeps found {sweeps_in_setup} in setup '{setup_name}'.")
+                raise RuntimeError(
+                    f"HFSS model validation failed: duplicate sweeps found {sweeps_in_setup} in setup '{setup_name}'. "
+                    f"Expected exactly 1."
+                )
             logger.info(f"Validated exactly one frequency sweep: '{sweep_name}'.")
+        else:
+            raise RuntimeError(
+                f"HFSS model validation failed: could not locate sweeps for setup '{setup_name}'."
+            )
 
         return True
 

@@ -588,4 +588,81 @@ def test_save_project_failure_raises():
         hfss_auto.save_project()
 
 
+def test_validate_prepared_model_observed_pyaedt_190_sweeps_dict_success():
+    """
+    Verifies that validate_prepared_model correctly validates sweeps when setup_sweeps_names
+    uses the observed PyAEDT 1.9.0 dictionary structure:
+    {'Nominal': 'LastAdaptive', 'Sweeps': ['Sweep_1to14GHz']}
+    both when keyed by setup name and when presented at top level.
+    """
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Patch_Type_A", "Port_P1", "AirBox"
+    ]
+    mock_hfss.excitation_names = ["P1_CPW"]
+    mock_rad_b = MagicMock()
+    mock_rad_b.type = "Radiation"
+    mock_rad_b.name = "RadiationBox"
+    mock_rad_b.props = {"Objects": ["AirBox"]}
+    mock_hfss.boundaries = [mock_rad_b]
+    mock_hfss.setup_names = ["Setup_UWB"]
+
+    # Case A: nested under setup name
+    mock_hfss.setup_sweeps_names = {
+        "Setup_UWB": {"Nominal": "LastAdaptive", "Sweeps": ["Sweep_1to14GHz"]}
+    }
+    hfss_auto.hfss = mock_hfss
+    assert hfss_auto.validate_prepared_model(
+        config_type="Type_A",
+        setup_name="Setup_UWB",
+        sweep_name="Sweep_1to14GHz"
+    ) is True
+
+    # Case B: top-level dictionary
+    mock_hfss.setup_sweeps_names = {
+        "Nominal": "LastAdaptive", "Sweeps": ["Sweep_1to14GHz"]
+    }
+    assert hfss_auto.validate_prepared_model(
+        config_type="Type_A",
+        setup_name="Setup_UWB",
+        sweep_name="Sweep_1to14GHz"
+    ) is True
+
+
+def test_validate_prepared_model_observed_pyaedt_190_sweeps_dict_missing_sweep_raises():
+    """
+    Verifies that validate_prepared_model strictly raises RuntimeError when the expected
+    sweep is absent from the PyAEDT 1.9.0 {'Nominal': 'LastAdaptive', 'Sweeps': [...]} structure.
+    """
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Patch_Type_A", "Port_P1", "AirBox"
+    ]
+    mock_hfss.excitation_names = ["P1_CPW"]
+    mock_rad_b = MagicMock()
+    mock_rad_b.type = "Radiation"
+    mock_rad_b.name = "RadiationBox"
+    mock_rad_b.props = {"Objects": ["AirBox"]}
+    mock_hfss.boundaries = [mock_rad_b]
+    mock_hfss.setup_names = ["Setup_UWB"]
+    mock_hfss.setup_sweeps_names = {
+        "Setup_UWB": {"Nominal": "LastAdaptive", "Sweeps": ["Sweep_Unrelated"]}
+    }
+    hfss_auto.hfss = mock_hfss
+
+    with pytest.raises(RuntimeError, match="sweep 'Sweep_1to14GHz' not found in setup 'Setup_UWB' sweeps \\['Sweep_Unrelated'\\]"):
+        hfss_auto.validate_prepared_model(
+            config_type="Type_A",
+            setup_name="Setup_UWB",
+            sweep_name="Sweep_1to14GHz"
+        )
+
+
+
 
