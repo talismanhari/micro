@@ -353,18 +353,19 @@ def test_setup_solution_and_sweep_pyaedt_190_signature():
 
 
 def test_validate_prepared_model_success():
-    """Verifies that validate_prepared_model passes when all components exist."""
+    """Verifies that validate_prepared_model passes when all components exist with actual names."""
     antenna_cfg, sim_cfg = main.load_configurations()
     hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
 
     mock_hfss = MagicMock()
     mock_hfss.modeler.object_names = [
-        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Patch_Type_A", "Port_P1", "AirBox"
     ]
     mock_hfss.excitation_names = ["P1_CPW"]
     mock_rad_b = MagicMock()
     mock_rad_b.type = "Radiation"
     mock_rad_b.name = "RadiationBox"
+    mock_rad_b.props = {"Objects": ["AirBox"]}
     mock_hfss.boundaries = [mock_rad_b]
     mock_hfss.setup_names = ["Setup_UWB"]
     mock_hfss.setup_sweeps_names = {"Setup_UWB": ["Sweep_1to14GHz"]}
@@ -386,7 +387,7 @@ def test_validate_prepared_model_missing_geometry_raises():
     mock_hfss = MagicMock()
     # Missing 'Port_P1'
     mock_hfss.modeler.object_names = [
-        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiationBox"
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "AirBox"
     ]
     hfss_auto.hfss = mock_hfss
 
@@ -401,7 +402,7 @@ def test_validate_prepared_model_missing_port_raises():
 
     mock_hfss = MagicMock()
     mock_hfss.modeler.object_names = [
-        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Patch_Type_A", "Port_P1", "AirBox"
     ]
     mock_hfss.excitation_names = []  # No excitations
     mock_hfss.boundaries = []
@@ -418,7 +419,7 @@ def test_validate_prepared_model_missing_radiation_boundary_raises():
 
     mock_hfss = MagicMock()
     mock_hfss.modeler.object_names = [
-        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Patch_Type_A", "Port_P1", "AirBox"
     ]
     mock_hfss.excitation_names = ["P1_CPW"]
     mock_hfss.boundaries = []  # No radiation boundary
@@ -428,6 +429,111 @@ def test_validate_prepared_model_missing_radiation_boundary_raises():
         hfss_auto.validate_prepared_model(config_type="Type_A")
 
 
+def test_validate_prepared_model_duplicate_port_raises():
+    """Verifies that validate_prepared_model raises RuntimeError if multiple duplicate ports exist."""
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Patch_Type_A", "Port_P1", "AirBox"
+    ]
+    mock_hfss.excitation_names = ["P1_CPW", "P1_CPW_1"]  # Accumulated duplicate ports
+    mock_rad_b = MagicMock()
+    mock_rad_b.type = "Radiation"
+    mock_rad_b.name = "RadiationBox"
+    mock_hfss.boundaries = [mock_rad_b]
+    mock_hfss.setup_names = ["Setup_UWB"]
+    mock_hfss.setup_sweeps_names = {"Setup_UWB": ["Sweep_1to14GHz"]}
+
+    hfss_auto.hfss = mock_hfss
+
+    with pytest.raises(RuntimeError, match="multiple port excitations found"):
+        hfss_auto.validate_prepared_model(config_type="Type_A")
+
+
+def test_validate_prepared_model_duplicate_radiation_boundary_raises():
+    """Verifies that validate_prepared_model raises RuntimeError if duplicate radiation boundaries exist."""
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Patch_Type_A", "Port_P1", "AirBox"
+    ]
+    mock_hfss.excitation_names = ["P1_CPW"]
+    rad1 = MagicMock()
+    rad1.type = "Radiation"
+    rad1.name = "RadiationBox"
+    rad2 = MagicMock()
+    rad2.type = "Radiation"
+    rad2.name = "RadiationBox_1"
+    mock_hfss.boundaries = [rad1, rad2]  # Duplicate boundaries
+    mock_hfss.setup_names = ["Setup_UWB"]
+    mock_hfss.setup_sweeps_names = {"Setup_UWB": ["Sweep_1to14GHz"]}
+
+    hfss_auto.hfss = mock_hfss
+
+    with pytest.raises(RuntimeError, match="duplicate radiation boundaries found"):
+        hfss_auto.validate_prepared_model(config_type="Type_A")
+
+
+def test_cleanup_previous_automation_items_removes_old_and_preserves_user_objects():
+    """
+    Verifies that cleanup_previous_automation_items:
+    - Removes old automation objects (Port_P1_1, AirBox_1, Substrate, etc.)
+    - Removes old automation boundaries (P1_CPW, RadiationBox)
+    - Removes old Setup_UWB
+    - Strictly preserves unrelated user objects (UserFixture, UserBoundary)
+    """
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    # Modeler contains automation items + user item
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Port_P1", "Port_P1_1", "AirBox", "AirBox_1", "UserFixture"
+    ]
+
+    # Boundaries contains automation items + user boundary
+    b_port = MagicMock()
+    b_port.name = "P1_CPW"
+    b_port_dup = MagicMock()
+    b_port_dup.name = "P1_CPW_1"
+    b_rad = MagicMock()
+    b_rad.name = "RadiationBox"
+    b_user = MagicMock()
+    b_user.name = "UserGroundClip"
+    mock_hfss.boundaries = [b_port, b_port_dup, b_rad, b_user]
+
+    # Setups contains Setup_UWB + UserSetup
+    mock_hfss.setup_names = ["Setup_UWB", "UserSetup"]
+
+    hfss_auto.hfss = mock_hfss
+
+    hfss_auto.cleanup_previous_automation_items()
+
+    # Modeler delete called on automation objects only, NOT UserFixture
+    mock_hfss.modeler.delete.assert_called_once()
+    deleted_objs = mock_hfss.modeler.delete.call_args[0][0]
+    assert "Substrate" in deleted_objs
+    assert "Port_P1" in deleted_objs
+    assert "Port_P1_1" in deleted_objs
+    assert "AirBox" in deleted_objs
+    assert "AirBox_1" in deleted_objs
+    assert "UserFixture" not in deleted_objs
+
+    # Boundaries deleted
+    b_port.delete.assert_called_once()
+    b_port_dup.delete.assert_called_once()
+    b_rad.delete.assert_called_once()
+    b_user.delete.assert_not_called()
+
+    # Setup deleted
+    mock_hfss.delete_setup.assert_called_once_with("Setup_UWB")
+
+
+
 def test_validate_prepared_model_missing_setup_raises():
     """Verifies that validate_prepared_model raises RuntimeError if setup is missing."""
     antenna_cfg, sim_cfg = main.load_configurations()
@@ -435,7 +541,7 @@ def test_validate_prepared_model_missing_setup_raises():
 
     mock_hfss = MagicMock()
     mock_hfss.modeler.object_names = [
-        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Patch_Type_A", "Port_P1", "AirBox"
     ]
     mock_hfss.excitation_names = ["P1_CPW"]
     mock_rad_b = MagicMock()
@@ -455,7 +561,7 @@ def test_validate_prepared_model_missing_sweep_raises():
 
     mock_hfss = MagicMock()
     mock_hfss.modeler.object_names = [
-        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Patch_Type_A", "Port_P1", "AirBox"
     ]
     mock_hfss.excitation_names = ["P1_CPW"]
     mock_rad_b = MagicMock()
