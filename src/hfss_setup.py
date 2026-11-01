@@ -347,47 +347,137 @@ class HFSSAutomation:
         delta_s = setup_cfg.get("max_delta_s", 0.02)
 
         setup = self.hfss.create_setup(name=setup_name)
+        if not setup:
+            raise RuntimeError(f"PyAEDT failed to create setup '{setup_name}'.")
         setup.props["Frequency"] = f"{f_center}GHz"
         setup.props["MaximumPasses"] = max_passes
         setup.props["MaxDeltaS"] = delta_s
+        setup.update()
         logger.info(f"Created Setup '{setup_name}' at {f_center} GHz (MaxPasses={max_passes}, DeltaS={delta_s}).")
 
         sweep_name = sweep_cfg.get("sweep_name", "Sweep_1to14GHz")
         f_start = sweep_cfg.get("start_freq_ghz", 1.0)
         f_stop = sweep_cfg.get("stop_freq_ghz", 14.0)
         step = sweep_cfg.get("step_size_ghz", 0.01)
+        sweep_type = sweep_cfg.get("sweep_type", "Interpolating")
+        save_fields = sweep_cfg.get("save_fields", False)
+
+        # PyAEDT 1.9.0 SetupHFSS.create_frequency_sweep uses num_of_freq_points (int)
+        # For 1.0 - 14.0 GHz with 0.01 GHz step: (14.0 - 1.0) / 0.01 + 1 = 1301 points
+        num_of_freq_points = int(round((f_stop - f_start) / step)) + 1
 
         sweep = setup.create_frequency_sweep(
             unit="GHz",
             name=sweep_name,
             start_frequency=f_start,
             stop_frequency=f_stop,
-            step_size=step,
-            sweep_type=sweep_cfg.get("sweep_type", "Interpolating")
+            num_of_freq_points=num_of_freq_points,
+            sweep_type=sweep_type,
+            save_fields=save_fields,
+            save_rad_fields=False
         )
-        logger.info(f"Configured Sweep '{sweep_name}' ({f_start} to {f_stop} GHz, step {step} GHz).")
+        if not sweep:
+            raise RuntimeError(f"PyAEDT failed to create frequency sweep '{sweep_name}' on setup '{setup_name}'.")
+
+        logger.info(
+            f"Configured Sweep '{sweep_name}' ({f_start} to {f_stop} GHz, "
+            f"{num_of_freq_points} points, step {step} GHz, type={sweep_type})."
+        )
         return setup, sweep
+
+    def validate_prepared_model(
+        self,
+        config_type: str = "Type_A",
+        setup_name: str = "Setup_UWB",
+        sweep_name: str = "Sweep_1to14GHz"
+    ) -> bool:
+        """
+        Validates that all required geometry objects, excitation port, radiation
+        boundary, solution setup, and frequency sweep are properly instantiated.
+        Raises RuntimeError if any critical component is missing.
+        """
+        if not self.hfss:
+            raise RuntimeError("HFSS instance is not initialized.")
+
+        # 1. Verify Model Objects
+        modeler_obj_attr = getattr(self.hfss.modeler, "object_names", None)
+        if isinstance(modeler_obj_attr, list):
+            required_objects = ["Substrate", "Ground_Left", "Ground_Right", "FeedLine", "Port_P1"]
+            ab_name = self.sim_cfg.get("air_box", {}).get("boundary_name", "RadiationBox")
+            required_objects.append(ab_name)
+
+            missing_objects = [obj for obj in required_objects if obj not in modeler_obj_attr]
+            if missing_objects:
+                raise RuntimeError(f"HFSS model validation failed: missing geometry objects {missing_objects}")
+            logger.info(f"Validated all required geometry objects: {required_objects}")
+
+        # 2. Verify Port Excitation
+        port_name = self.sim_cfg.get("excitation", {}).get("port_name", "P1_CPW")
+        excitations = getattr(self.hfss, "excitation_names", None)
+        boundaries = getattr(self.hfss, "boundaries", None)
+        if isinstance(excitations, list) and isinstance(boundaries, list):
+            b_names = [getattr(b, "name", str(b)) for b in boundaries]
+            if port_name not in excitations and not any(port_name in b for b in b_names):
+                raise RuntimeError(f"HFSS model validation failed: excitation port '{port_name}' not found.")
+            logger.info(f"Validated excitation port '{port_name}'.")
+
+        # 3. Verify Radiation Boundary
+        if isinstance(boundaries, list):
+            ab_name = self.sim_cfg.get("air_box", {}).get("boundary_name", "RadiationBox")
+            has_rad = any(
+                getattr(b, "type", "") == "Radiation"
+                or "rad" in getattr(b, "name", "").lower()
+                or ab_name in getattr(b, "name", "")
+                for b in boundaries
+            )
+            if not has_rad:
+                raise RuntimeError("HFSS model validation failed: radiation boundary not found.")
+            logger.info("Validated radiation boundary.")
+
+        # 4. Verify Solution Setup
+        setups = getattr(self.hfss, "setup_names", None)
+        if isinstance(setups, list):
+            if setup_name not in setups:
+                raise RuntimeError(f"HFSS model validation failed: setup '{setup_name}' not found in active setups {setups}.")
+            logger.info(f"Validated solution setup '{setup_name}'.")
+
+        # 5. Verify Frequency Sweep
+        setup_sweeps = getattr(self.hfss, "setup_sweeps_names", None)
+        if isinstance(setup_sweeps, dict) and setup_name in setup_sweeps:
+            sweeps_in_setup = setup_sweeps.get(setup_name, [])
+            if sweep_name not in sweeps_in_setup:
+                raise RuntimeError(f"HFSS model validation failed: sweep '{sweep_name}' not found in setup '{setup_name}' sweeps {sweeps_in_setup}.")
+            logger.info(f"Validated frequency sweep '{sweep_name}'.")
+
+        return True
 
     def prepare_model(self, config_type: str = "Type_A", param: Optional[float] = None) -> bool:
         """
         Builds geometry, materials, boundaries, and solution setup without running solve.
-        Safely saves the model in HFSS.
+        Validates model completeness and safely saves the model in HFSS.
         """
         logger.info(f"Preparing HFSS model for {config_type} (param={param})...")
         self.build_model(config_type=config_type, param=param)
-        self.setup_solution_and_sweep()
+        setup, sweep = self.setup_solution_and_sweep()
+        s_name = getattr(setup, "name", "Setup_UWB")
+        sw_name = getattr(sweep, "name", "Sweep_1to14GHz")
+        self.validate_prepared_model(config_type=config_type, setup_name=s_name, sweep_name=sw_name)
         self.save_project()
-        logger.info(f"HFSS model prepared and project saved: {config_type}")
+        logger.info(f"HFSS model prepared, verified, and project saved: {config_type}")
         return True
 
     def save_project(self):
         """Saves native .aedt project file."""
-        if self.hfss:
-            try:
-                self.hfss.save_project()
-                logger.info("HFSS project successfully saved.")
-            except Exception as e:
-                logger.warning(f"Could not save project: {e}")
+        if not self.hfss:
+            raise RuntimeError("HFSS instance is not initialized; cannot save project.")
+        try:
+            saved = self.hfss.save_project()
+            if saved is False:
+                raise RuntimeError("HFSS.save_project() returned False.")
+            logger.info("HFSS project successfully saved.")
+        except Exception as e:
+            logger.error(f"Failed to save HFSS project: {e}")
+            raise
 
     def close(self):
         """

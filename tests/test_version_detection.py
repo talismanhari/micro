@@ -307,3 +307,179 @@ def test_terminal_lumped_port_assignment_in_build_model():
     )
 
 
+def test_setup_solution_and_sweep_pyaedt_190_signature():
+    """
+    Verifies that setup_solution_and_sweep:
+    - Creates Setup_UWB at 7.5 GHz, max_passes=12, delta_s=0.02
+    - Calls setup.update()
+    - Invokes setup.create_frequency_sweep with verified PyAEDT 1.9.0 signature:
+      unit="GHz", start_frequency=1.0, stop_frequency=14.0,
+      num_of_freq_points=1301, sweep_type="Interpolating", save_fields=False, save_rad_fields=False
+    - Does NOT pass unexpected keyword argument 'step_size'
+    """
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_setup = MagicMock()
+    mock_setup.props = {}
+    mock_sweep = MagicMock()
+    mock_setup.create_frequency_sweep.return_value = mock_sweep
+    mock_hfss.create_setup.return_value = mock_setup
+
+    hfss_auto.hfss = mock_hfss
+
+    setup, sweep = hfss_auto.setup_solution_and_sweep()
+
+    # Verify setup creation and properties
+    mock_hfss.create_setup.assert_called_once_with(name="Setup_UWB")
+    assert mock_setup.props["Frequency"] == "7.5GHz"
+    assert mock_setup.props["MaximumPasses"] == 12
+    assert mock_setup.props["MaxDeltaS"] == 0.02
+    mock_setup.update.assert_called_once()
+
+    # Verify sweep call arguments
+    mock_setup.create_frequency_sweep.assert_called_once_with(
+        unit="GHz",
+        name="Sweep_1to14GHz",
+        start_frequency=1.0,
+        stop_frequency=14.0,
+        num_of_freq_points=1301,
+        sweep_type="Interpolating",
+        save_fields=False,
+        save_rad_fields=False
+    )
+    assert sweep == mock_sweep
+
+
+def test_validate_prepared_model_success():
+    """Verifies that validate_prepared_model passes when all components exist."""
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+    ]
+    mock_hfss.excitation_names = ["P1_CPW"]
+    mock_rad_b = MagicMock()
+    mock_rad_b.type = "Radiation"
+    mock_rad_b.name = "RadiationBox"
+    mock_hfss.boundaries = [mock_rad_b]
+    mock_hfss.setup_names = ["Setup_UWB"]
+    mock_hfss.setup_sweeps_names = {"Setup_UWB": ["Sweep_1to14GHz"]}
+
+    hfss_auto.hfss = mock_hfss
+
+    assert hfss_auto.validate_prepared_model(
+        config_type="Type_A",
+        setup_name="Setup_UWB",
+        sweep_name="Sweep_1to14GHz"
+    ) is True
+
+
+def test_validate_prepared_model_missing_geometry_raises():
+    """Verifies that validate_prepared_model raises RuntimeError if a geometry object is missing."""
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    # Missing 'Port_P1'
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiationBox"
+    ]
+    hfss_auto.hfss = mock_hfss
+
+    with pytest.raises(RuntimeError, match="missing geometry objects.*Port_P1"):
+        hfss_auto.validate_prepared_model(config_type="Type_A")
+
+
+def test_validate_prepared_model_missing_port_raises():
+    """Verifies that validate_prepared_model raises RuntimeError if port excitation is missing."""
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+    ]
+    mock_hfss.excitation_names = []  # No excitations
+    mock_hfss.boundaries = []
+    hfss_auto.hfss = mock_hfss
+
+    with pytest.raises(RuntimeError, match="excitation port 'P1_CPW' not found"):
+        hfss_auto.validate_prepared_model(config_type="Type_A")
+
+
+def test_validate_prepared_model_missing_radiation_boundary_raises():
+    """Verifies that validate_prepared_model raises RuntimeError if radiation boundary is missing."""
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+    ]
+    mock_hfss.excitation_names = ["P1_CPW"]
+    mock_hfss.boundaries = []  # No radiation boundary
+    hfss_auto.hfss = mock_hfss
+
+    with pytest.raises(RuntimeError, match="radiation boundary not found"):
+        hfss_auto.validate_prepared_model(config_type="Type_A")
+
+
+def test_validate_prepared_model_missing_setup_raises():
+    """Verifies that validate_prepared_model raises RuntimeError if setup is missing."""
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+    ]
+    mock_hfss.excitation_names = ["P1_CPW"]
+    mock_rad_b = MagicMock()
+    mock_rad_b.type = "Radiation"
+    mock_hfss.boundaries = [mock_rad_b]
+    mock_hfss.setup_names = ["OtherSetup"]  # Missing Setup_UWB
+    hfss_auto.hfss = mock_hfss
+
+    with pytest.raises(RuntimeError, match="setup 'Setup_UWB' not found"):
+        hfss_auto.validate_prepared_model(config_type="Type_A", setup_name="Setup_UWB")
+
+
+def test_validate_prepared_model_missing_sweep_raises():
+    """Verifies that validate_prepared_model raises RuntimeError if sweep is missing."""
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.modeler.object_names = [
+        "Substrate", "Ground_Left", "Ground_Right", "FeedLine", "RadiatingPatch", "Port_P1", "RadiationBox"
+    ]
+    mock_hfss.excitation_names = ["P1_CPW"]
+    mock_rad_b = MagicMock()
+    mock_rad_b.type = "Radiation"
+    mock_hfss.boundaries = [mock_rad_b]
+    mock_hfss.setup_names = ["Setup_UWB"]
+    mock_hfss.setup_sweeps_names = {"Setup_UWB": ["OtherSweep"]}  # Missing Sweep_1to14GHz
+    hfss_auto.hfss = mock_hfss
+
+    with pytest.raises(RuntimeError, match="sweep 'Sweep_1to14GHz' not found"):
+        hfss_auto.validate_prepared_model(config_type="Type_A", setup_name="Setup_UWB", sweep_name="Sweep_1to14GHz")
+
+
+def test_save_project_failure_raises():
+    """Verifies that save_project raises RuntimeError when hfss.save_project returns False."""
+    antenna_cfg, sim_cfg = main.load_configurations()
+    hfss_auto = HFSSAutomation(antenna_cfg, sim_cfg)
+
+    mock_hfss = MagicMock()
+    mock_hfss.save_project.return_value = False
+    hfss_auto.hfss = mock_hfss
+
+    with pytest.raises(RuntimeError, match="HFSS.save_project\\(\\) returned False"):
+        hfss_auto.save_project()
+
+
+
